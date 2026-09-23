@@ -1,0 +1,229 @@
+# 数据库操作智能体 — 设计文档
+
+- 日期：2026-09-23
+- 状态：已确认（用户批准）
+- 包名：`com.mingzy.dbagent`
+- 仓库：https://gitee.com/mingzy/database-operation-agent.git
+
+## 1. 目标与范围
+
+构建一个基于 Spring Boot + Spring AI 的数据库操作智能体：用户通过自然语言对话或手写 SQL 对数据库执行增删改查；智能体的数据库操作能力同时封装为 MCP（Model Context Protocol）标准接口，供外部大模型客户端（Claude Desktop、Cursor 等）调用。前后端打包为单体 jar，开箱即用。
+
+范围内：
+1. 数据源管理（MySQL、PostgreSQL）：增删改查、连接测试、动态生效、只读开关
+2. 大模型管理：可配置/启用模型（名称、供应商、baseUrl、apiKey、模型ID、temperature、maxTokens）；模型ID 为字典管理，按厂商动态加载下拉
+3. 元数据管理 + SQL 执行（增删改查）封装为 MCP 工具，同时供内置 ChatClient function calling 使用
+4. 会话功能：WebSocket 交互式会话；右侧上方 SQL 控制台；右侧下方动态结果集列表
+5. 前端 Ant Design Vue 3 SPA，构建产物打包进后端 `static/`
+6. README 初始化
+
+范围外（YAGNI）：多用户权限体系、SQL 审计审批流、更多数据库方言（Oracle/SQLServer）、Anthropic/DashScope 原生适配器。
+
+## 2. 技术栈
+
+| 项 | 选型 |
+|---|---|
+| 语言/运行时 | Java 21（Temurin 21） |
+| 后端框架 | Spring Boot 3.5.x |
+| AI 框架 | Spring AI 1.0.x GA（实施时以 Maven Central 最新稳定 GA 为准） |
+| MCP | `spring-ai-starter-mcp-server-webmvc`，Streamable HTTP，端点 `/mcp` |
+| 配置存储 | SQLite（`org.xerial:sqlite-jdbc`，文件 `./data/agent.db`，WAL 模式） |
+| 持久化访问 | spring-jdbc `JdbcTemplate`（表数量少，避免 ORM 兼容性坑） |
+| 初始化脚本 | `spring.sql.init`：`mode=always`、`continue-on-error=true`、`schema-locations=classpath:sql/schema.sql`、`data-locations=classpath:sql/update.sql`（两者均幂等可重复执行） |
+| 连接池 | HikariCP（配置库存一个池 + 每个受管数据源一个池） |
+| JDBC 驱动 | `com.mysql:mysql-connector-j`、`org.postgresql:postgresql` |
+| 前端 | Vue 3 + Vite + Ant Design Vue 3 + vue-router + axios + 原生 WebSocket 封装 |
+| 构建 | 单 Maven 工程 + `frontend/` 前端目录；`frontend-maven-plugin` 在 package 阶段构建前端并拷贝到 `target/classes/static`；`-Pskip-frontend` 可跳过 |
+
+## 3. 总体架构
+
+**核心架构决策（方案 A：共享工具层）**：核心数据库操作能力只实现一份，注册为 Spring AI `ToolCallbackProvider` Bean：
+
+- **对内**：`ChatClient` 挂载同一批工具做 function calling（自然语言 → 元数据探查 → SQL 执行 → 自然语言回答）
+- **对外**：MCP Server（Streamable HTTP）自动发现同一批工具，暴露为标准 MCP tools
+- 无网络回环、无自连接依赖，工具行为两端完全一致
+
+```
+浏览器 (Vue3 SPA, 打包进 static/)
+   │  REST + WebSocket
+   ▼
+web 层 (REST Controllers, WS Handler)
+   ▼
+chat 会话编排 (ChatService, 确认机制) ──► ChatClient ◄── Spring AI (OpenAI 兼容)
+   ▼                                        │ tool call
+tool 共享工具层 (ToolCallbackProvider) ◄────┘
+   │                 ▲
+   │                 └──── MCP Server (Streamable HTTP /mcp) ◄── 外部大模型客户端
+   ▼
+executor SQL执行器 ── metadata 元数据服务 (MySQL/PG 方言)
+   ▼
+datasource 动态数据源管理 (HikariCP 池 Map)
+   ▼
+受管数据库 (MySQL / PostgreSQL)         配置库 SQLite (./data/agent.db)
+```
+
+## 4. 模块划分
+
+```
+com.mingzy.dbagent
+├── config/       Spring 配置、WebSocket 配置、MCP 配置、SPA 转发、ChatClient 工厂配置
+├── common/       统一响应 Result、全局异常、AES-GCM 加解密工具、JSON 工具
+├── datasource/   数据源实体/DAO、连接测试、DynamicDataSourceManager（HikariCP 池 Map，增删改即时刷新）
+├── model/        大模型实体/DAO、启用切换、ChatClientFactory（按 DB 配置动态构建 OpenAI 兼容客户端）
+├── dict/         字典实体/DAO、按 dict_type 与 parent_key 查询（厂商→模型ID 两级）
+├── metadata/     元数据服务接口 + MySQL/PostgreSQL 两个方言实现（表、视图、列、主键、注释）
+├── executor/     SqlExecutor：语句分类（query/update/ddl）、SELECT 自动注入 LIMIT、超时、结果行截断
+├── tool/         共享工具：list_datasources / list_tables / get_table_schema / execute_query / execute_update
+├── mcp/          MCP Server 工具注册（自动发现 tool 包）
+├── chat/         会话/消息服务、ChatService（编排 LLM 对话循环）、写操作确认（CompletableFuture）、WS Handler
+└── web/          REST Controllers（datasource/model/dict/session/confirm/console）
+```
+
+## 5. 数据模型（SQLite，7 张表）
+
+所有表由 `schema.sql` 以 `CREATE TABLE IF NOT EXISTS` 创建，种子数据由 `update.sql` 以 `INSERT ... WHERE NOT EXISTS`（或等价幂等写法）插入。
+
+1. `ds_datasource`：id、name(唯一)、db_type(mysql/postgresql)、host、port、database_name、username、password(AES-GCM 密文)、extra_params、read_only(0/1)、created_at、updated_at
+2. `ai_model`：id、name、provider(字典 key)、base_url、api_key(AES-GCM 密文)、model_id、temperature、max_tokens、enabled(0/1)、created_at、updated_at
+3. `sys_dict`：id、dict_type(model_provider / model_id)、dict_key、dict_label、parent_key(模型ID 归属的厂商 key)、sort、enabled
+4. `chat_session`：id、title、datasource_id、model_id、created_at、updated_at
+5. `chat_message`：id、session_id、role(user/assistant/tool)、content、tool_calls_json、status、created_at
+6. `sql_result`：id、session_id、message_id、datasource_id、sql_text、result_type(query/update/ddl/error)、columns_json、rows_json(最多截断存 500 行)、row_count、affected_rows、elapsed_ms、ai_comment(智能体解读)、source(agent/console)、status(success/error/pending)、error_message、created_at
+7. `confirm_request`：id、session_id、message_id、datasource_id、sql_text、status(pending/approved/rejected/expired)、created_at、expires_at
+
+## 6. 核心流程
+
+### 6.1 自然语言查询（WebSocket）
+1. 前端通过 `ws://.../ws/session/{sessionId}` 发送用户消息（含 sessionId、当前 datasourceId）
+2. ChatService 持久化消息 → 组装上下文（系统提示词：当前数据源、回答规范、默认 LIMIT 10 说明；最近 20 条历史消息）→ 调 ChatClient（携带共享工具）
+3. LLM 可能先调 `list_tables` / `get_table_schema`，再调 `execute_query`
+4. 执行器对 SELECT 自动注入 `LIMIT 10`（用户显式要求更多时按用户值），结果写入 `sql_result`（source=agent）并即时 WS 推送 `result` 事件
+5. 工具结果回填 LLM → 生成自然语言答案 → WS 推送 `message` 事件；若答案对应某次查询，则同时把答案写入该 `sql_result.ai_comment` 并推送 `result_update` 事件
+6. 前端：左侧消息流显示自然语言答案（工具调用过程可折叠展示），右下结果集列表新增/更新卡片
+
+### 6.2 写操作确认（内部会话）
+1. LLM 调 `execute_update` → 工具检测到写语句 → 创建 `confirm_request`（status=pending, expires_at=+60s）→ WS 推送 `confirm_request` 事件（含 SQL、数据源、请求ID）
+2. 工具线程以 `CompletableFuture.get(60s)` 挂起等待
+3. 用户点击"确认执行" → `POST /api/confirm/{id}/approve` → 真正执行 SQL → `future.complete(执行结果)` → WS 推送执行结果
+4. 用户点击"取消" → `reject` → `future.complete(被拒绝)`；超时 → `expired`；两种情况都以文字消息回填 LLM，由其告知用户
+5. 只读数据源：写操作直接拒绝（无论是否确认）
+
+### 6.3 SQL 控制台（右侧上方）
+1. 用户选择数据源、输入 SQL、点击执行 → `POST /api/sessions/{id}/console/execute`
+2. 用户手写 SQL 无需确认，直接执行（查询同样默认 LIMIT 10，可通过按钮选择行数上限）
+3. 结果写入 `sql_result`（source=console）并 WS 推送，右下结果集列表展示
+
+### 6.4 MCP 对外
+- 外部大模型客户端连接 `http://<host>:8080/mcp`（Streamable HTTP）调用工具集
+- `execute_update` 带 MCP 工具注解 `destructiveHint=true`，由 MCP 客户端负责向用户确认；服务端仍受只读数据源开关约束
+- 工具入参中的数据源以**数据源名称**（唯一）指定，对 LLM 更友好
+
+## 7. 共享工具清单（MCP 与内置 ChatClient 同一批）
+
+| 工具名 | 说明 | 入参 | 注解 |
+|---|---|---|---|
+| `list_datasources` | 列出全部数据源及类型 | – | readOnlyHint |
+| `list_tables` | 列出某数据源的表与视图 | datasourceName | readOnlyHint |
+| `get_table_schema` | 表/视图结构（列、类型、可空、主键、注释） | datasourceName, tableName | readOnlyHint |
+| `execute_query` | 执行 SELECT（自动注入 LIMIT 10） | datasourceName, sql, limit? | readOnlyHint |
+| `execute_update` | 执行 INSERT/UPDATE/DELETE/DDL（内部会话走确认；MCP 走 destructiveHint） | datasourceName, sql | destructiveHint |
+
+## 8. REST / WS / MCP 接口面
+
+REST（统一前缀 `/api`）：
+- 数据源：`GET|POST /datasources`、`PUT|DELETE /datasources/{id}`、`POST /datasources/test`（未保存表单亦可测）
+- 元数据：`GET /datasources/{id}/tables`、`GET /datasources/{id}/tables/{table}/schema`
+- 模型：`GET|POST /models`、`PUT|DELETE /models/{id}`、`POST /models/{id}/enable`、`POST /models/test`
+- 字典：`GET|POST /dicts`、`PUT|DELETE /dicts/{id}`、`GET /dicts/model_ids?provider=`（联动下拉）
+- 会话：`GET|POST /sessions`、`DELETE /sessions/{id}`、`GET /sessions/{id}/messages`、`GET /sessions/{id}/results`
+- 控制台：`POST /sessions/{id}/console/execute`
+- 确认：`POST /confirm/{id}/approve`、`POST /confirm/{id}/reject`
+
+WebSocket：`/ws/session/{sessionId}`，事件类型：`message`、`result`、`result_update`、`confirm_request`、`confirm_result`、`error`。
+
+MCP：`/mcp`（Streamable HTTP）。
+
+SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前端路由用 History 模式）。
+
+## 9. 前端页面设计
+
+布局：Ant Design Vue `Layout` + 顶部/侧边 `Menu`。
+
+### 9.1 对话工作台 `/chat`（核心页面）
+- 顶部栏：会话列表下拉/新建会话、数据源选择器、模型选择器（仅列出 enabled 模型）
+- 左栏（会话）：消息流（用户气泡、助手气泡、工具调用过程折叠块、**写操作确认卡片**（SQL 高亮 + 确认/取消按钮 + 倒计时）、错误提示）；底部输入框 + 发送
+- 右上（SQL 控制台）：数据源选择、SQL 文本域（等宽字体）、执行按钮、行数上限选择、格式化按钮
+- 右下（结果集列表）：按时间倒序的卡片列表，每张卡片含：数据源、SQL（可复制）、耗时/行数/影响行数、状态标签（成功/失败/待确认）、Ant Design `Table` 结果表格（动态列）、`ai_comment` 的"AI 解读"区块；支持折叠与清空
+- 历史恢复：进入页面时 REST 拉取 messages/results；WS 断线自动重连（指数退避），重连后按 messageId 增量补齐
+
+### 9.2 数据源管理 `/datasources`
+表格（名称、类型、主机、库名、只读、操作）+ 新建/编辑弹窗表单（类型下拉 mysql/postgresql、host、port、database、username、password、额外参数、只读开关）+ 行内"测试连接"按钮 + 删除二次确认。
+
+### 9.3 模型管理 `/models`
+表格（名称、供应商、模型ID、baseUrl、启用开关、操作）+ 新建/编辑弹窗（供应商下拉来自字典 `model_provider`；模型ID 下拉随供应商联动加载字典 `model_id`，`parent_key=供应商`，支持自定义输入）+ "测试连接"按钮（发一条最小请求验证）+ 启用互斥由服务端保证：同一时间**最多一个**模型 `enabled=1`，启用新模型时自动禁用其他。
+
+### 9.4 字典管理 `/dict`
+按 dict_type 分 Tab（model_provider / model_id）；model_id 记录维护 parent_key（所属厂商）；支持增删改、启用/停用、排序。
+
+## 10. 错误处理策略
+
+| 场景 | 处理 |
+|---|---|
+| 数据源连接失败 | 表单/结果卡片展示原始异常信息；连接测试接口返回结构化错误 |
+| SQL 语法/执行错误 | 结果卡片红色状态展示错误；错误信息回填 LLM 提示其自我修正（不自动重复执行超过 1 次） |
+| LLM 调用失败 | WS 推送 error 事件，前端显示错误气泡；不吞异常 |
+| SQL 执行超时 | 默认 30s（`Statement.setQueryTimeout`），可配置 |
+| 确认超时 | 60s 自动置 expired，回填 LLM "用户未在时限内确认" |
+| WS 断线 | 前端指数退避重连 + 增量拉取补齐 |
+| MCP 调用错误 | 以 MCP 工具错误结果返回（异常信息文本化） |
+
+## 11. 初始化数据与验收标准
+
+### 11.1 幂等种子数据（update.sql）
+- 字典（dict_type=model_provider）：minimax、deepseek、qwen、zhipu、openai、ollama 六家厂商；字典（dict_type=model_id）按 parent_key 归组预置：MiniMax-M3；DeepSeek-Chat、DeepSeek-Reasoner；Qwen-Plus、Qwen-Max；GLM-4-Plus；gpt-4o-mini；qwen2.5:7b 等。全部厂商统一走 OpenAI 兼容适配器，差异仅在 baseUrl
+- 测试模型：MiniMax-M3（provider=minimax，baseUrl=`https://api.minimaxi.com/v1`，apiKey 使用 `docs/测试用大模型配置.md` 中的测试密钥，modelId=MiniMax-M3，enabled=1）；README 标注密钥仅供测试
+- 测试数据源：`mysql-mytest`（jdbc:mysql://192.168.110.88:3306/mytest，root）、`pg-mytest`（jdbc:postgresql://192.168.110.88:5432/mytest，ming），密码以 AES-GCM 密文写入
+- 数据库密码与 apiKey 的 AES 密钥来自 `application.yml`（给出默认值，README 提示生产更换）
+
+### 11.2 验收用例（人工走查）
+1. 会话输入"帮我查询用户列表？" → 智能体自动发现用户表 → 右下结果集表格正确展示（默认 10 行），左侧给出自然语言说明与所用 SQL
+2. 会话输入"系统有多少用户？" → 右下结果卡片展示 `select count(*) from ...` 与结果，且"AI 解读"区块展示"系统有 XXX 个用户"；左侧会话同步回答
+3. SQL 控制台输入 `select * from users` → 右下结果集展示表格
+4. 外部 MCP 客户端连接 `http://localhost:8080/mcp` → 能看到 5 个工具并可调用 `list_datasources`
+
+## 12. 测试策略
+
+- 单元测试（JUnit 5 + AssertJ）：
+  - `SqlClassifier`：语句分类（query/update/ddl）
+  - `LimitInjector`：SELECT 自动 LIMIT 注入（含已有 LIMIT、多语句、注释场景）
+  - AES-GCM 加解密往返
+  - 字典与数据源 DAO（内存 SQLite）
+- 集成测试（可选，需 192.168.110.88 网络可达）：MySQL/PG 连接测试、元数据查询
+- 验收：第 11.2 节用例人工走查
+- 每个实施阶段结束运行 `mvn test` 并汇报真实输出
+
+## 13. 构建与运行
+
+- 开发：`mvn spring-boot:run`（后端）+ `cd frontend && npm run dev`（Vite 代理 `/api`、`/ws`、`/mcp`）
+- 打包：`mvn clean package`（自动构建前端进 `static/`；`-Pskip-frontend` 仅打包后端）
+- 运行：`java -jar target/database-operation-agent-*.jar` → `http://localhost:8080`
+- 配置库文件：`./data/agent.db`（首次启动自动创建）
+
+## 14. 假设与风险
+
+1. Spring AI 1.0 GA 的 MCP Streamable HTTP 配置项以实施时的官方文档为准（计划阶段通过 Maven 验证版本与依赖可用性）
+2. `frontend-maven-plugin` 需要下载 Node 发行包；若构建环境无外网，退化为"本地已装 Node 手动构建 + 拷贝 static"并写入 README
+3. 测试用数据库 192.168.110.88 需在验收时可达；不可达时用本地 MySQL/PostgreSQL 容器替代
+4. SQLite 并发写入采用 WAL + 服务端串行写（synchronized 写入方法）
+5. MiniMax-M3 走 OpenAI 兼容协议（`/v1/chat/completions`），工具调用（function calling）能力以实测为准；若该模型不支持 tools，则回退为"LLM 产出 SQL、后端解析执行"的降级路径仅作用于该模型
+6. `docs/测试用大模型配置.md` 含真实测试密钥，README 明确其仅用于本地测试
+
+## 15. 验收清单（Definition of Done）
+
+- [ ] `mvn clean package` 一条命令产出含前端的可运行 jar
+- [ ] 数据源管理：MySQL/PostgreSQL 增删改查、测试连接、只读开关动态生效
+- [ ] 模型管理：配置/启用模型；厂商→模型ID 字典联动下拉
+- [ ] 工具能力对内（ChatClient）与对外（`/mcp`）均可用
+- [ ] 会话：WS 交互、写操作确认卡片、SQL 控制台、结果集列表、历史持久化
+- [ ] 验收用例 1、2 通过
+- [ ] README 初始化完成（架构、快速开始、配置、MCP 接入说明、测试密钥警示）
