@@ -3435,8 +3435,7 @@ class DatabaseToolsTest {
               created_at TEXT, updated_at TEXT)
             """);
         DatasourceDao dao = new DatasourceDao(jdbc);
-        AesGcmUtil aes = new AesGcmUtil("VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU=");
-        DatasourceService sp = new DatasourceService(dao, aes, new DynamicDataSourceManager());
+        DatasourceService sp = new DatasourceService(dao, "VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU=", new DynamicDataSourceManager());
         service = sp;
         // 用 sqlite 文件库充当"受管数据源"，验证工具链（路径用临时文件使多连接可见）
         tools = new DatabaseTools(sp, new SqlExecutor(),
