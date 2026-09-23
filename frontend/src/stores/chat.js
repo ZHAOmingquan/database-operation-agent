@@ -40,6 +40,9 @@ export const useChatStore = defineStore('chat', {
     sendMessage(content, datasourceId, modelId) {
       this.thinking = true
       this.lastPrompt = { content, modelId }
+      // 后端以首条消息为标题；本地同步列表展示（截断规则与后端 abbreviate 一致）
+      const cur = this.sessions.find((s) => s.id === this.currentSessionId)
+      if (cur && cur.title === '新会话') cur.title = content.length <= 20 ? content : content.slice(0, 20) + '…'
       socket.send({ type: 'user_message', content, datasourceId, modelId })
     },
     clearNoDatasource() { this.noDatasource = null },
@@ -92,7 +95,10 @@ export const useChatStore = defineStore('chat', {
     async removeSession(id) {
       await sessionApi.remove(id)
       this.sessions = this.sessions.filter((s) => s.id !== id)
-      if (this.currentSessionId === id) { this.currentSessionId = null; this.messages = []; this.results = []; socket.disconnect() }
+      if (this.currentSessionId === id) {
+        this.currentSessionId = null; this.messages = []; this.results = []; socket.disconnect()
+        if (this.sessions.length) await this.switchSession(this.sessions[0].id)
+      }
     }
   }
 })

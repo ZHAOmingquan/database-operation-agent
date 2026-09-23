@@ -1,37 +1,36 @@
 <template>
-  <a-layout style="height: 100%">
-    <a-layout-header class="topbar">
-      <a-space :size="12">
-        <a-select v-model:value="currentSessionId" style="width: 200px" size="small" placeholder="选择/新建会话"
-                  :options="sessionOptions" @change="onSessionChange" />
-        <a-button size="small" @click="newSession">新建会话</a-button>
+  <a-layout class="chat-view">
+    <a-layout-sider width="240" theme="light" class="pane session-pane">
+      <SessionList :datasource-id="datasourceId" />
+    </a-layout-sider>
+    <a-layout-content class="pane chat-pane">
+      <div class="chat-toolbar">
         <a-select v-model:value="datasourceId" style="width: 180px" size="small" placeholder="数据源"
-                  :options="datasourceOptions" @change="onDatasourceChange" />
+                  :options="datasourceOptions" />
         <a-select v-model:value="modelId" style="width: 200px" size="small" placeholder="模型"
                   :options="modelOptions" />
         <a-badge :status="store.connected ? 'processing' : 'default'"
                  :text="store.connected ? '已连接' : '未连接'" />
-      </a-space>
-    </a-layout-header>
-    <a-layout>
-      <a-layout-sider width="38%" theme="light" class="left-pane">
+      </div>
+      <div class="chat-body">
         <ChatPanel :datasource-id="datasourceId" :model-id="modelId" />
-      </a-layout-sider>
-      <a-layout-content class="right-pane">
-        <SqlConsole />
-        <ResultPanel />
-      </a-layout-content>
-    </a-layout>
+      </div>
+    </a-layout-content>
+    <a-layout-sider width="42%" theme="light" class="pane console-pane">
+      <SqlConsole />
+      <ResultPanel />
+    </a-layout-sider>
     <DatasourceFormModal v-model:open="dsModalOpen" @saved="onDatasourceSaved" />
   </a-layout>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
-import { datasourceApi, modelApi, sessionApi } from '../api'
+import { datasourceApi, modelApi } from '../api'
+import SessionList from '../components/SessionList.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import SqlConsole from '../components/SqlConsole.vue'
 import ResultPanel from '../components/ResultPanel.vue'
@@ -39,13 +38,10 @@ import DatasourceFormModal from '../components/DatasourceFormModal.vue'
 
 const store = useChatStore()
 const router = useRouter()
-const currentSessionId = ref(undefined)
 const datasourceId = ref(undefined)
 const modelId = ref(undefined)
 const datasourceOptions = ref([])
 const modelOptions = ref([])
-
-const sessionOptions = computed(() => store.sessions.map((s) => ({ value: s.id, label: s.title })))
 
 onMounted(async () => {
   await store.loadSessions()
@@ -55,20 +51,8 @@ onMounted(async () => {
   if (dsList.length) datasourceId.value = dsList[0].id
   const enabled = models.find((m) => m.enabled)
   if (enabled) modelId.value = enabled.id
-  if (store.sessions.length) {
-    currentSessionId.value = store.sessions[0].id
-    await store.switchSession(store.sessions[0].id)
-  }
+  if (store.sessions.length) await store.switchSession(store.sessions[0].id)
 })
-
-const onSessionChange = async (id) => { await store.switchSession(id) }
-const newSession = async () => {
-  const s = await sessionApi.create({ datasourceId: datasourceId.value })
-  store.sessions.unshift(s)
-  currentSessionId.value = s.id
-  await store.switchSession(s.id)
-}
-const onDatasourceChange = () => {}
 
 // 无数据源闭环：后端推送 no_datasource 时弹出新建数据源表单（已有数据源但未选择则提示）
 const dsModalOpen = ref(false)
@@ -99,8 +83,15 @@ const onDatasourceSaved = async (ds) => {
 </script>
 
 <style scoped>
-.topbar { background: #fff; border-bottom: 1px solid #f0f0f0; padding: 0 12px; height: 48px; line-height: 48px; }
-.left-pane { border-right: 1px solid #f0f0f0; }
-.right-pane { display: flex; flex-direction: column; height: 100%; }
-.right-pane > :last-child { flex: 1; overflow: hidden; }
+.chat-view { height: 100%; }
+.pane { height: 100%; }
+.session-pane { border-right: 1px solid #f0f0f0; }
+.console-pane { border-left: 1px solid #f0f0f0; display: flex; flex-direction: column; }
+.console-pane > :last-child { flex: 1; overflow: hidden; }
+.chat-pane { display: flex; flex-direction: column; min-width: 0; }
+.chat-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; border-bottom: 1px solid #f0f0f0; background: #fff;
+}
+.chat-body { flex: 1; min-height: 0; }
 </style>

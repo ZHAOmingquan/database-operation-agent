@@ -2,7 +2,7 @@
   <div :class="['msg', msg.role]">
     <div class="bubble">
       <template v-if="msg.role === 'assistant'">
-        <div class="answer">{{ answer }}</div>
+        <div class="answer markdown-body" v-html="answerHtml"></div>
         <a-tag v-if="msg.toolResultIds?.length" color="blue" style="margin-top:6px">
           已执行 {{ msg.toolResultIds.length }} 个 SQL（见右下结果集）
         </a-tag>
@@ -14,10 +14,12 @@
 
 <script setup>
 import { computed } from 'vue'
+import { renderMarkdown } from '../utils/markdown'
 
 const props = defineProps({ msg: { type: Object, required: true } })
-// 推理模型（如 MiniMax-M3）会把 <think>…</think> 思维链原样写进 content，展示时剥离
+// 推理模型（如 MiniMax-M3）会把 <think>…</think> 思维链原样写进 content，展示时剥离后按 Markdown 渲染
 const answer = computed(() => (props.msg.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim())
+const answerHtml = computed(() => renderMarkdown(answer.value))
 </script>
 
 <style scoped>
@@ -26,5 +28,5 @@ const answer = computed(() => (props.msg.content || '').replace(/<think>[\s\S]*?
 .bubble { max-width: 85%; padding: 8px 12px; border-radius: 8px; background: #f5f5f5; white-space: pre-wrap; word-break: break-word; }
 .msg.user .bubble { background: #1677ff; color: #fff; }
 .msg.error .bubble { background: #fff2f0; color: #cf1322; }
-.answer { white-space: pre-wrap; }
+.answer { word-break: break-word; }
 </style>

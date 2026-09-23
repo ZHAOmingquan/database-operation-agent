@@ -32,7 +32,7 @@
 | 初始化脚本 | `spring.sql.init`：`mode=always`、`continue-on-error=true`、`schema-locations=classpath:sql/schema.sql`、`data-locations=classpath:sql/update.sql`（两者均幂等可重复执行） |
 | 连接池 | HikariCP（配置库存一个池 + 每个受管数据源一个池） |
 | JDBC 驱动 | `com.mysql:mysql-connector-j`、`org.postgresql:postgresql` |
-| 前端 | Vue 3 + Vite + Ant Design Vue 3 + vue-router + axios + 原生 WebSocket 封装 |
+| 前端 | Vue 3 + Vite + Ant Design Vue 3 + vue-router + axios + 原生 WebSocket 封装 + markdown-it（Markdown 渲染）+ ECharts（图表） |
 | 构建 | 单 Maven 工程 + `frontend/` 前端目录；`frontend-maven-plugin` 在 package 阶段构建前端并拷贝到 `target/classes/static`；`-Pskip-frontend` 可跳过 |
 
 ## 3. 总体架构
@@ -136,6 +136,7 @@ com.mingzy.dbagent
 | `get_table_schema` | 表/视图结构（列、类型、可空、主键、注释） | datasourceName, tableName | readOnlyHint |
 | `execute_query` | 执行 SELECT（自动注入 LIMIT 10） | datasourceName, sql, limit? | readOnlyHint |
 | `execute_update` | 执行 INSERT/UPDATE/DELETE/DDL（内部会话走确认；MCP 走 destructiveHint） | datasourceName, sql | destructiveHint |
+| `render_chart` | 执行统计聚合 SQL 并把结果推送为图表配置（ECharts：bar/line/pie）在前端结果区展示（迭代需求 2） | datasourceName, sql, chartType, title?, xField?, yField? | readOnlyHint |
 
 ## 8. REST / WS / MCP 接口面
 
@@ -157,13 +158,14 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 
 ## 9. 前端页面设计
 
-布局：Ant Design Vue `Layout` + 顶部/侧边 `Menu`。
+布局：Ant Design Vue `Layout` + **顶部水平导航**（明亮主题、白底；迭代需求 2 起不再使用左侧全局菜单，见 16.1）。
 
-### 9.1 对话工作台 `/chat`（核心页面）
-- 顶部栏：会话列表下拉/新建会话、数据源选择器、模型选择器（仅列出 enabled 模型）
-- 左栏（会话）：消息流（用户气泡、助手气泡、工具调用过程折叠块、**写操作确认卡片**（SQL 高亮 + 确认/取消按钮 + 倒计时）、错误提示）；底部输入框 + 发送
-- 右上（SQL 控制台）：数据源选择、SQL 文本域（等宽字体）、执行按钮、行数上限选择、格式化按钮
-- 右下（结果集列表）：按时间倒序的卡片列表，每张卡片含：数据源、SQL（可复制）、耗时/行数/影响行数、状态标签（成功/失败/待确认）、Ant Design `Table` 结果表格（动态列）、`ai_comment` 的"AI 解读"区块；支持折叠与清空
+### 9.1 对话工作台 `/chat`（核心页面，迭代需求 2 起为三栏布局）
+- 全局：顶部水平导航 + 明亮主题（见 16.1；不再使用左侧全局菜单与顶栏会话下拉）
+- 左栏（会话列表，240px）：会话列表（当前高亮）+ 新建会话 + 删除（二次确认）；发送消息后会话标题本地同步为问题摘要
+- 中栏（对话）：工具条（数据源选择器、模型选择器（仅列出 enabled 模型）、WS 连接状态徽标）；消息流（用户气泡、助手气泡（Markdown 渲染）、工具调用过程折叠块、**写操作确认卡片**（SQL 高亮 + 确认/取消按钮 + 倒计时）、错误提示）；底部输入框 + 发送
+- 右栏（42%）：上方 SQL 控制台（数据源选择、SQL 文本域（等宽字体）、执行按钮、行数上限选择、格式化按钮）；下方结果集列表
+- 结果集卡片：数据源、SQL（可复制）、耗时/行数/影响行数、状态标签（成功/失败/待确认）、**表格 / 图表视图切换**（ECharts 柱状/折线/饼图；AI 出图时默认图表视图并标注「AI 图表」）、`ai_comment` 的"AI 解读"区块（Markdown 渲染）；支持折叠与清空
 - 历史恢复：进入页面时 REST 拉取 messages/results；WS 断线自动重连（指数退避），重连后按 messageId 增量补齐
 - 无数据源引导：系统中没有任何数据源时，用户直接提问 → 弹出「新建数据源」表单（与数据源管理页共用同一表单组件 `DatasourceFormModal`）；保存成功后自动将新数据源设为当前选择并重发原问题，形成业务闭环
 
@@ -198,7 +200,7 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 ### 11.1 幂等种子数据（update.sql）
 - 字典（dict_type=model_provider）：deepseek、qwen、glm、kimi、minimax 五家厂商；字典（dict_type=model_id）按 parent_key 各预置 2 个：deepseek-v4-flash/pro、qwen3.8-max/flash、glm-5.3/flash、k3/kimi-for-coding、MiniMax-M3/M2.7。全部厂商统一走 OpenAI 兼容适配器，差异仅在 baseUrl
 - 系统配置（sys_config）：`developer_mode=false`（开发者模式默认关闭；开启后才允许执行 DELETE/DROP/TRUNCATE）
-- 测试模型：MiniMax-M3（provider=minimax，baseUrl=`https://api.minimaxi.com/v1`，apiKey 使用 `docs/测试用大模型配置.md` 中的测试密钥，modelId=MiniMax-M3，enabled=1）；README 标注密钥仅供测试
+- 测试模型：MiniMax-M3（provider=minimax，baseUrl=`https://api.minimaxi.com/v1`，apiKey 使用 `docs/测试用大模型配置.md` 中的测试密钥，modelId=MiniMax-M3，enabled=1）；README 标注密钥仅供测试（**迭代需求 2 已整体移除此种子**：仓库不留任何模型密钥配置，见 16.6）
 - 测试数据源：`mysql-mytest`（jdbc:mysql://192.168.110.88:3306/mytest，root）、`pg-mytest`（jdbc:postgresql://192.168.110.88:5432/mytest，ming），密码以 AES-GCM 密文写入
 - 数据库密码与 apiKey 的 AES 密钥来自 `application.yml`（给出默认值，README 提示生产更换）
 
@@ -216,6 +218,8 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
   - `LimitInjector`：SELECT 自动 LIMIT 注入（含已有 LIMIT、多语句、注释场景）
   - AES-GCM 加解密往返
   - 字典与数据源 DAO（内存 SQLite）
+  - `ChartConfigBuilder`：图表类型归一与 x/y 字段自动推导（迭代需求 2）
+  - `SensitiveDataMasker`：JDBC URL / Access denied / PG 认证失败 / password= 等凭据形态脱敏（迭代需求 2）
 - 集成测试（可选，需 192.168.110.88 网络可达）：MySQL/PG 连接测试、元数据查询
 - 验收：第 11.2 节用例人工走查
 - 每个实施阶段结束运行 `mvn test` 并汇报真实输出
@@ -247,3 +251,35 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 - [ ] 系统配置：开发者模式开关；关闭时删除类操作（DELETE/DROP/TRUNCATE）被拦截并弹提示框，开启后删除仍逐笔确认
 - [ ] 验收用例 1、2 通过
 - [ ] README 初始化完成（架构、快速开始、配置、MCP 接入说明、测试密钥警示）
+
+## 16. 迭代需求 2（2026-09-23 交付，实施与实测见计划 Task 31）
+
+用户验收后追加的 5 项需求的落地设计。
+
+### 16.1 顶部导航 + 明亮主题
+- 全局布局由「左侧菜单」改为「顶部水平导航」：`a-layout-header`（白底、56px、底部分隔线）+ `theme="light"` 水平 Menu，logo 使用主题蓝（`#1677ff`）。
+- 5 个路由入口（对话工作台 / 数据源管理 / 模型管理 / 字典管理 / 系统配置）全部位于顶部导航；内容区高度自适应（`calc(100% - 56px)`）。
+
+### 16.2 Markdown 渲染
+- 引入 markdown-it：`html:false`（防注入）、`breaks`、`linkify`，外链统一加 `target=_blank rel=noopener noreferrer`。
+- 助手消息（MessageItem）与结果卡片 AI 解读（ResultCard）统一经 `frontend/src/utils/markdown.js` 的 `renderMarkdown()` 渲染，样式由全局 `.markdown-body` 提供。
+
+### 16.3 三栏工作台 + ECharts 图表
+- `/chat` 三栏：左栏会话列表（新建 / 切换 / 删除，240px）；中栏对话（工具条 = 数据源、模型选择器 + WS 连接状态；消息流 + 输入框）；右栏 42%（上 SQL 控制台、下结果集列表）。
+- **数据契约（`sql_result.chart_config`）**：新增 TEXT 列，存 `{"chartType":"bar|line|pie","title":…,"xField":…,"yField":…}`；schema.sql 建表包含该列并以 `ALTER TABLE … ADD COLUMN` 幂等迁移旧库（重复执行由 `continue-on-error` 容忍）。
+- **AI 自动出图（`render_chart` 工具，第 7 节工具清单第 6 项）**：后端执行聚合 SQL → `ChartConfigBuilder` 组装图表配置（xField 缺省取第一列、yField 缺省取第一个数值列，无法识别数值列时返回可读错误）→ 经会话钩子落库并 WS 推送 → 前端结果卡片默认以图表视图展示并标注「AI 图表」；系统提示词规则：统计分析、趋势 / 分布 / 占比、分组对比或明确要求图表时，必须写聚合 SQL 并调用该工具。
+- **手动切换**：任意结果卡片支持「表格 / 图表」切换与图表类型（柱状 / 折线 / 饼图）选择；前端 `ChartView.vue` 按需注册 echarts/core（Bar/Line/Pie + Grid/Legend/Title/Tooltip + CanvasRenderer），ResizeObserver 自适应尺寸。
+
+### 16.4 凭据隔离（数据库账号密码不发给大模型）
+- 边界：LLM 与 MCP 客户端可见面仅「数据源名称 / 类型 + 元数据 + SQL 执行结果 +（脱敏后的）错误信息」；密码、用户名、主机不进入提示词、工具返回值或 MCP 响应。
+- 审计结论：API 返回体（DatasourceView）无密码字段（仅 hasPassword）；系统提示词仅含 name/dbType；代码无凭据日志。
+- 风险点修复：连接池 fail-fast 与驱动异常消息可能携带 `Access denied for user 'u'@'h' (using password: YES)`、JDBC URL 或 `password=` 明文——新增 `SensitiveDataMasker`（JDBC_URL / ACCESS_DENIED / PG_AUTH_FAILED / KEY_VALUE_SECRET 四类 pattern），在**全部工具返回值出口统一脱敏**（7 处，替换为 `***` 占位符），对内置对话与 MCP 同时生效。
+- 设计边界：脱敏仅作用于回传 LLM 的文本；本地日志与前端结果卡片保留原始错误信息便于排障（前端展示属可信通道）。
+
+### 16.5 日志落盘（logback）
+- `logback-spring.xml`：控制台 + 滚动文件双 appender；文件路径 `${LOG_DIR:-logs}/database-operation-agent.log`（默认应用工作目录 `logs/`，环境变量可覆盖）；按天 + 单文件 50MB 滚动、保留 30 天、总量上限 1GB、历史归档 gzip。
+- 级别：根 INFO；业务包 `com.mingzy.dbagent` DEBUG；`com.zaxxer.hikari` INFO（抑制心跳刷屏）。
+- `.gitignore` 增加 `logs/`，运行日志不进仓库。
+
+### 16.6 种子数据调整
+- 为配合 16.4，`update.sql` 移除「测试模型 MiniMax-M3」种子（含加密后的测试密钥密文）；全新环境首启仅预置两个测试数据源与字典 / 系统配置。测试模型请在「模型管理」页面自行新增。

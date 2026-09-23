@@ -6128,6 +6128,56 @@ git add -A && git commit -m "docs: initialize README with architecture, quicksta
 
 ---
 
+### Task 31: 迭代需求 2（顶部导航 / Markdown / 三栏工作台与图表 / 凭据隔离 / 日志落盘）
+
+**背景（验收后用户追加）：**
+1. 菜单改顶部导航且统一明亮主题（不用左侧菜单栏、导航不用深色背景）；
+2. 会话输出的 Markdown 需在浏览器渲染为易读格式；
+3. 对话工作台改三栏：左会话列表、中会话交互、右 SQL 控制台（上 SQL 文本域 / 下结果集区）；结果集支持 ECharts 图表，统计分析类命令需执行统计 SQL 并包装为图表结构展示；
+4. 数据库账号密码不得发给大模型：大模型只负责语义理解与生成 SQL，执行 SQL 由本服务工具与 MCP 完成；
+5. 补充 logback 日志配置，明确日志输出位置。
+
+**Files:**
+- Create: `src/main/java/com/mingzy/dbagent/tool/ChartConfigBuilder.java`、`src/main/java/com/mingzy/dbagent/common/SensitiveDataMasker.java`、`src/main/resources/logback-spring.xml`
+- Create: `frontend/src/utils/markdown.js`、`frontend/src/components/ChartView.vue`、`frontend/src/components/SessionList.vue`
+- Modify: `src/main/java/com/mingzy/dbagent/tool/DatabaseTools.java`、`src/main/java/com/mingzy/dbagent/chat/ChatService.java`、`src/main/java/com/mingzy/dbagent/chat/SqlResult.java`、`src/main/java/com/mingzy/dbagent/chat/ChatDao.java`、`src/main/java/com/mingzy/dbagent/chat/web/SessionController.java`、`src/main/resources/sql/schema.sql`、`src/main/resources/sql/update.sql`（移除测试模型密钥种子）
+- Modify: `frontend/src/App.vue`、`frontend/src/views/ChatView.vue`、`frontend/src/components/MessageItem.vue`、`frontend/src/components/ResultCard.vue`、`frontend/src/stores/chat.js`、`frontend/src/styles.css`、`frontend/package.json`（新增 markdown-it / echarts）
+- Test: `src/test/java/com/mingzy/dbagent/tool/ChartConfigBuilderTest.java`（新建 6 例）、`src/test/java/com/mingzy/dbagent/common/SensitiveDataMaskerTest.java`（新建 8 例）、`src/test/java/com/mingzy/dbagent/chat/ChatDaoTest.java`（新增 chartConfigRoundTrip）
+
+- [ ] **Step 1: 数据契约 — `sql_result.chart_config`**
+  schema.sql 的 `sql_result` 建表增加 `chart_config TEXT`；文件末尾追加 `ALTER TABLE sql_result ADD COLUMN chart_config TEXT;` 幂等迁移旧库（重复执行报 duplicate column 由 `continue-on-error=true` 容忍）；`SqlResult` record 增加 `chartConfig` 字段；`ChatDao` 的 RESULT_MAPPER 与 insertResult 适配（16 列）；`SessionController.consoleExecute` 构造处补 `null`。
+
+- [ ] **Step 2: 后端 `render_chart` 工具（AI 自动出图）**
+  `DatabaseTools` 新增 `render_chart(datasourceName, sql, chartType, title, xField, yField, ToolContext)`：执行查询 → `ChartConfigBuilder` 生成 `{chartType,title,xField,yField}`（chartType 容忍中文/大小写、默认 bar；xField 缺省=第一列；yField 缺省=第一个数值列，无法识别数值列时返回可读错误）→ 经 `SessionHook.onQuery` 第 7 参 chartJson 落库并 WS 推送 → 返回文本结果供模型解说。`ChatService` 系统提示词增加规则 6：统计分析、趋势/分布/占比、分组对比或明确要求图表时必须改用 `render_chart` 写聚合 SQL。
+
+- [ ] **Step 3: 凭据隔离（SensitiveDataMasker）**
+  审计结论：API 返回体（DatasourceView）不含密码字段；系统提示词仅含数据源 name/dbType；代码无密钥日志；唯一回流点 = 工具异常消息（连接池 fail-fast 抛出的 `Access denied for user 'u'@'h' (using password: YES)`、JDBC URL、`password=` 等）→ 新建 `SensitiveDataMasker`（4 类 pattern：JDBC_URL / ACCESS_DENIED / PG_AUTH_FAILED / KEY_VALUE_SECRET，附 `scrub` / `containsCredential` / `firstCredentialHit`），在 `DatabaseTools` 全部工具返回值出口统一应用 `scrub`（7 处：listTables / getTableSchema / executeQuery / executeUpdate / renderChart 的 catch + renderChart 失败分支 + renderResult 错误分支）。设计边界：仅脱敏回传 LLM 的文本，本地日志与前端展示保留原始信息便于排障。
+
+- [ ] **Step 4: 日志落盘（logback-spring.xml）**
+  CONSOLE + FILE 双 appender；FILE 为 `RollingFileAppender`（`${LOG_DIR:-logs}/database-operation-agent.log`，SizeAndTimeBasedRollingPolicy：单文件 50MB / 保留 30 天 / 总量上限 1GB，历史 `.gz`）；业务包 `com.mingzy.dbagent` DEBUG、hikari INFO；`.gitignore` 增加 `logs/`。
+
+- [ ] **Step 5: 前端（顶部导航 + Markdown + 三栏 + 图表）**
+  ① `App.vue`：`a-layout-header` 顶部导航（白底 56px、水平 light Menu、logo 主题蓝），移除全局左侧 Sider 与顶栏会话下拉；② `utils/markdown.js`（markdown-it：`html:false` 防注入、`breaks`、`linkify`、外链 `target=_blank rel=noopener`），`MessageItem` 与 `ResultCard.aiComment` 统一渲染，全局 `.markdown-body` 样式；③ `ChatView.vue` 三栏：左 `SessionList` 240px（新建/切换/删除 popconfirm）、中 toolbar（数据源/模型/连接徽标）+ ChatPanel、右 42%（SqlConsole + ResultPanel）；`stores/chat.js`：发送后本地同步会话标题、删除当前会话后自动切换第一个；④ `ChartView.vue`：echarts/core 按需注册（Bar/Line/Pie + Grid/Legend/Title/Tooltip + CanvasRenderer），x/y 字段自动映射、类目过多时轴标签旋转、ResizeObserver 自适应；`ResultCard.vue`：表格/图表视图切换 + 图表类型下拉 + 「AI 图表」标记，存在 chart_config 时默认图表视图。
+
+- [ ] **Step 6: 测试与全量验收**
+  `./mvnw test -Pskip-frontend` → 61 全绿；`./mvnw clean package` 全量构建；重启服务（18080）后按实测记录完成浏览器验收与 MCP 脱敏 E2E。
+
+**实测记录（2026-09-23，迭代需求 2）：**
+1. 单元测试：`./mvnw test -Pskip-frontend` → **61 tests 全绿**（较 Task 30 的 46 净增 15：ChartConfigBuilder 6 + SensitiveDataMasker 8 + ChatDao.chartConfigRoundTrip 1）。
+2. 前端构建 + 打包：`npm run build`（`index-CQL7P6WI.js`，ChatView chunk 670KB 含 echarts + markdown-it）→ 全量 `./mvnw clean package` BUILD SUCCESS（61 tests、13 个前端资源复制进 static）。服务以 `--server.port=18080` 运行（8080 被 VS Code 占用）。
+3. 浏览器验收（agent-browser）：
+   - 布局：顶部导航存在且白底（`headerBg=rgb(255,255,255)`、`inlineMenus=0`、仅三栏内 2 个 light sider），左侧全局菜单已移除；
+   - Markdown：助手回答 DOM 含 `P/H2/TABLE/PRE/CODE` 子元素（截图确认渲染效果）；
+   - AI 出图：提问后模型调用 `render_chart`（SQL：`SELECT status, COUNT(*) AS user_count FROM users GROUP BY status ORDER BY status`），结果卡片出现「AI 图表」标记 + ECharts canvas + 「表格/图表」切换 + 图表类型下拉；
+   - 控制台：执行 `select "A" as k,10 as v union all ...` → 「3 行 · 9ms · 控制台」，手动切图表模式 canvas 出现；
+   - 会话列表：新建会话（标题本地同步为问题摘要）、切换旧会话 4 条消息恢复、删除当前会话后自动切换第一项。
+4. 脱敏 E2E（`/tmp/mcp_mask_test.sh`）：创建错误密码数据源 → MCP `tools/call execute_query` → 工具返回（大模型可见）为 `查询失败: Failed to initialize pool: Access denied for user '***'@'***' (using password=***)`——原始用户名 / 主机 IP / 密码均未出现（断言全部 PASS）；期间发现 `(using password: YES)` 右括号被吞 → KEY_VALUE_SECRET 排除字符集补 `()` 并加单测 `keepsTrailingParenWhenMaskingAuthFlag`；测试数据源已清理（DELETE 200）。
+5. 日志：`logs/database-operation-agent.log` 正常生成并增长（9.8KB → 21.7KB），含业务包 DEBUG 与 hikari 连接日志；`.gitignore` 已忽略 `logs/`。
+6. 文档复核时发现 `renderChart` 的 `!result.success()` 分支未走脱敏（与其余 6 处出口不一致），补充 `SensitiveDataMasker.scrub` 后重新全量构建复验通过。
+7. 交付清理：浏览器验收产生的空「新会话」与临时测试数据源均已删除；服务保持运行（18080）。
+
+---
+
 ## 附录 A：验收清单对照（Definition of Done）
 
 - [x] `./mvnw clean package` 一条命令产出含前端的可运行 jar（Task 29 Step 1）
@@ -6139,6 +6189,15 @@ git add -A && git commit -m "docs: initialize README with architecture, quicksta
 - [x] README 完成（Task 30）
 - [x] 无数据源提问引导新建数据源闭环（Task 22/25/26A/28/29）
 - [x] 开发者模式删除拦截前后端闭环（Task 22B/25/27/29）
+
+### 迭代需求 2 对照（2026-09-23，Task 31）
+
+- [x] 菜单改顶部导航 + 明亮主题（布局检查：`headerBg=rgb(255,255,255)`、无左侧全局菜单）
+- [x] 会话输出 Markdown 浏览器渲染（MessageItem / ResultCard 共用 markdown-it）
+- [x] 三栏工作台（会话列表 / 对话 / 控制台+结果）与 ECharts 图表（AI 自动出图 `render_chart` + 手动切换）
+- [x] 凭据隔离：工具异常消息「出口统一脱敏」（用户名/主机/密码/JDBC URL → `***`），MCP E2E 验证不回传
+- [x] logback 日志落盘（`logs/database-operation-agent.log`，滚动 + gz 归档）
+- [x] 全量 61 单测全绿 + 浏览器验收通过
 
 ## 附录 B：执行注意事项
 

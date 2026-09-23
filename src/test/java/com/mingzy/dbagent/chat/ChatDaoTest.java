@@ -29,7 +29,7 @@ class ChatDaoTest {
               datasource_id INTEGER, datasource_name TEXT, sql_text TEXT NOT NULL, result_type TEXT NOT NULL,
               columns_json TEXT, rows_json TEXT, row_count INTEGER DEFAULT 0, affected_rows INTEGER, elapsed_ms INTEGER,
               ai_comment TEXT, source TEXT NOT NULL DEFAULT 'agent', status TEXT NOT NULL DEFAULT 'success',
-              error_message TEXT, created_at TEXT)
+              error_message TEXT, chart_config TEXT, created_at TEXT)
             """);
         jdbc.execute("""
             CREATE TABLE confirm_request (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL,
@@ -64,12 +64,23 @@ class ChatDaoTest {
 
         long rid = dao.insertResult(new SqlResult(null, sid, aid, 1L, "mysql-mytest",
                 "select count(*) from users", "query", "[\"count(*)\"]", "[[10]]", 1, null, 5L,
-                null, "agent", "success", null, null));
+                null, "agent", "success", null, null, null));
         List<SqlResult> results = dao.listResults(sid);
         assertThat(results).hasSize(1);
         assertThat(results.get(0).rowCount()).isEqualTo(1);
         dao.updateResultComment(rid, "系统有 10 个用户");
         assertThat(dao.listResults(sid).get(0).aiComment()).isEqualTo("系统有 10 个用户");
+    }
+
+    @Test
+    void chartConfigRoundTrip() {
+        long sid = dao.insertSession("s", null, null);
+        String cfg = "{\"chartType\":\"bar\",\"title\":\"用户状态分布\",\"xField\":\"status\",\"yField\":\"cnt\"}";
+        long rid = dao.insertResult(new SqlResult(null, sid, null, 1L, "mysql-mytest",
+                "select status, count(*) as cnt from users group by status", "query",
+                "[\"status\",\"cnt\"]", "[[\"1\",1036]]", 1, null, 7L,
+                null, "agent", "success", null, cfg, null));
+        assertThat(dao.findResult(rid).chartConfig()).isEqualTo(cfg);
     }
 
     @Test

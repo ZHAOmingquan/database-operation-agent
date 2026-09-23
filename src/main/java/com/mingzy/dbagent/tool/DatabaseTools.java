@@ -1,5 +1,6 @@
 package com.mingzy.dbagent.tool;
 
+import com.mingzy.dbagent.common.SensitiveDataMasker;
 import com.mingzy.dbagent.datasource.Datasource;
 import com.mingzy.dbagent.datasource.DatasourceService;
 import com.mingzy.dbagent.executor.DeleteGuard;
@@ -8,6 +9,7 @@ import com.mingzy.dbagent.executor.SqlExecutor;
 import com.mingzy.dbagent.metadata.MetadataServiceRouter;
 import com.mingzy.dbagent.metadata.model.ColumnInfo;
 import com.mingzy.dbagent.metadata.model.TableInfo;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
@@ -18,6 +20,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 import java.util.StringJoiner;
 
 @Component
@@ -32,11 +35,12 @@ public class DatabaseTools implements ToolCallbackProvider {
     private final int maxResultRows;
     private final int queryTimeout;
     private final MethodToolCallbackProvider delegate;
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** 由 ChatService/ConfirmationService 在工具执行前注入的会话上下文钩子（见 Task 21/22） */
     public interface SessionHook {
-        /** 返回 null 表示 MCP 外部通道（无会话确认）；否则内部会话需确认并落库。sql=工具执行时的 SQL 原文 */
-        String onQuery(long sessionId, long datasourceId, String datasourceName, String sql, SqlExecResult result, String traceIdStr);
+        /** 返回 null 表示 MCP 外部通道（无会话确认）；否则内部会话需确认并落库。sql=工具执行时的 SQL 原文；chartJson 非空表示该结果需要前端渲染为图表 */
+        String onQuery(long sessionId, long datasourceId, String datasourceName, String sql, SqlExecResult result, String traceIdStr, String chartJson);
         /** 写操作：内部会话返回 null 表示已确认可执行；返回非 null 为拒绝/超时原因；MCP 通道直接执行 */
         String confirmWrite(long sessionId, long datasourceId, String datasourceName, String sql, Long traceId);
         /** 删除类操作被开发者模式守卫拦截时的通知（仅内部会话触发；MCP 无会话不触发） */
@@ -101,7 +105,7 @@ public class DatabaseTools implements ToolCallbackProvider {
             }
             return sj.toString();
         } catch (Exception e) {
-            return "获取表列表失败: " + e.getMessage();
+            return "获取表列表失败: " + SensitiveDataMasker.scrub(e.getMessage());
         }
     }
 
@@ -123,7 +127,7 @@ public class DatabaseTools implements ToolCallbackProvider {
             }
             return sj.toString();
         } catch (Exception e) {
-            return "获取表结构失败: " + e.getMessage();
+            return "获取表结构失败: " + SensitiveDataMasker.scrub(e.getMessage());
         }
     }
 
@@ -138,11 +142,11 @@ public class DatabaseTools implements ToolCallbackProvider {
             SqlExecResult result = executor.executeQuery(ref.pool(), sql, effLimit, maxResultRows, queryTimeout);
             Long sessionId = sessionIdOf(toolContext);
             if (sessionId != null && sessionHook != null) {
-                sessionHook.onQuery(sessionId, ref.datasource().id(), datasourceName, sql, result, traceIdOf(toolContext) == null ? null : String.valueOf(traceIdOf(toolContext)));
+                sessionHook.onQuery(sessionId, ref.datasource().id(), datasourceName, sql, result, traceIdOf(toolContext) == null ? null : String.valueOf(traceIdOf(toolContext)), null);
             }
             return renderResult(sql, result);
         } catch (Exception e) {
-            return "查询失败: " + e.getMessage();
+            return "查询失败: " + SensitiveDataMasker.scrub(e.getMessage());
         }
     }
 
@@ -171,11 +175,42 @@ public class DatabaseTools implements ToolCallbackProvider {
             }
             SqlExecResult result = executor.executeUpdate(ref.pool(), sql, queryTimeout);
             if (sessionId != null && sessionHook != null) {
-                sessionHook.onQuery(sessionId, ref.datasource().id(), datasourceName, sql, result, traceIdOf(toolContext) == null ? null : String.valueOf(traceIdOf(toolContext)));
+                sessionHook.onQuery(sessionId, ref.datasource().id(), datasourceName, sql, result, traceIdOf(toolContext) == null ? null : String.valueOf(traceIdOf(toolContext)), null);
             }
             return renderResult(sql, result);
         } catch (Exception e) {
-            return "执行失败: " + e.getMessage();
+            return "执行失败: " + SensitiveDataMasker.scrub(e.getMessage());
+        }
+    }
+
+    @Tool(name = "render_chart", description = "执行统计查询并把结果以图表形式展示在前端右侧结果区（ECharts，支持 bar 柱状/line 折线/pie 饼图）。当用户要求统计分析、趋势/分布/占比、分组对比或明确要求图表时使用。请传入聚合统计 SQL（含 GROUP BY 等）并指定图表类型；xField/yField 缺省时自动取第一列与第一个数值列。")
+    public String renderChart(@ToolParam(description = "数据源名称") String datasourceName,
+                              @ToolParam(description = "统计 SQL（SELECT 聚合查询）") String sql,
+                              @ToolParam(description = "图表类型：bar（柱状）/line（折线）/pie（饼图）") String chartType,
+                              @ToolParam(description = "图表标题（可选）", required = false) String title,
+                              @ToolParam(description = "X 轴/分类字段名（可选，默认第一列）", required = false) String xField,
+                              @ToolParam(description = "Y 轴/数值字段名（可选，默认第一个数值列）", required = false) String yField,
+                              ToolContext toolContext) {
+        try {
+            DatasourceService.HikariPoolRef ref = poolOf(datasourceName);
+            SqlExecResult result = executor.executeQuery(ref.pool(), sql, maxResultRows, maxResultRows, queryTimeout);
+            if (!result.success()) return "图表统计 SQL 执行失败: " + SensitiveDataMasker.scrub(result.errorMessage());
+            Map<String, Object> cfg;
+            try {
+                cfg = ChartConfigBuilder.build(chartType, title, xField, yField, result.columns(), result.rows());
+            } catch (IllegalArgumentException e) {
+                return "无法生成图表: " + e.getMessage() + "。请调整统计 SQL 或字段映射后重试。";
+            }
+            String chartJson = MAPPER.writeValueAsString(cfg);
+            Long sessionId = sessionIdOf(toolContext);
+            if (sessionId != null && sessionHook != null) {
+                sessionHook.onQuery(sessionId, ref.datasource().id(), datasourceName, sql, result,
+                        traceIdOf(toolContext) == null ? null : String.valueOf(traceIdOf(toolContext)), chartJson);
+            }
+            return "已生成" + cfg.get("chartType") + "图表并推送到前端结果区展示（标题：" + cfg.get("title")
+                    + "，X轴：" + cfg.get("xField") + "，Y轴：" + cfg.get("yField") + "）：\n" + renderResult(sql, result);
+        } catch (Exception e) {
+            return "生成图表失败: " + SensitiveDataMasker.scrub(e.getMessage());
         }
     }
 
@@ -185,7 +220,7 @@ public class DatabaseTools implements ToolCallbackProvider {
     }
 
     private String renderResult(String sql, SqlExecResult r) {
-        if (!r.success()) return "SQL 执行失败: " + r.errorMessage();
+        if (!r.success()) return "SQL 执行失败: " + SensitiveDataMasker.scrub(r.errorMessage());
         StringBuilder sb = new StringBuilder();
         if ("query".equals(r.resultType())) {
             sb.append("查询返回 ").append(r.rowCount()).append(" 行");

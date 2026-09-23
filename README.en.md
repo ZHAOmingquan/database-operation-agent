@@ -4,15 +4,19 @@ An AI agent that operates databases through natural-language conversation. Built
 
 ## Features
 
-- **Chat workbench**: ask in natural language; the agent inspects schemas, generates & runs SQL, and shows result cards with AI commentary
+- **Chat workbench (3-pane)**: top light navigation; session pane, chat pane (Markdown-rendered answers), SQL console + result panel
+- **Natural language queries**: the agent inspects schemas, generates & runs SQL, and shows result cards with AI commentary
 - **Datasource management**: MySQL / PostgreSQL CRUD, connection test, read-only switch; passwords stored with AES-GCM; dynamic Hikari pools
 - **Model management**: provider / model-ID dictionary cascading, base URL & API key, enable switch
 - **Sessions & confirmation**: WebSocket message stream; write operations require user confirmation (60s countdown)
 - **Developer-mode delete guard**: DELETE / DROP / TRUNCATE are blocked by default; the UI guides you to enable the switch
 - **No-datasource closure**: when no datasource exists, asking a question pops up a "new datasource" form; saving it auto-resends your question
 - **SQL console**: run ad-hoc SQL directly (no confirmation), results join the result panel
-- **MCP server**: `/mcp` (Streamable HTTP) exposes 5 tools for Claude Desktop / Cursor etc.
+- **Charts (ECharts)**: statistics / trend / share questions trigger the `render_chart` tool (aggregate SQL → bar / line / pie, tagged "AI 图表"); any result card can be switched between table and chart
+- **MCP server**: `/mcp` (Streamable HTTP) exposes 6 tools for Claude Desktop / Cursor etc.
 - **Persistence**: sessions, messages and results are stored in SQLite and restored on refresh
+- **Credential isolation**: DB accounts / passwords / hosts never reach the LLM; tool error messages are masked before returning
+- **File logging**: console + rolling file `logs/database-operation-agent.log` (gzip archives)
 
 ## Architecture
 
@@ -25,6 +29,7 @@ Spring Boot 3.5 + Spring AI 1.1
      Shared tool layer (single implementation)
   list_datasources · list_tables · get_table_schema
   execute_query (limits/timeout) · execute_update (confirm + delete guard)
+  render_chart (aggregate SQL → ECharts)
         │
   SQLite (config/session store) · MySQL / PostgreSQL (dynamic pools)
 ```
@@ -44,11 +49,11 @@ java -jar target/database-operation-agent-1.0.0.jar
 # open http://localhost:8080  → redirects to /chat
 ```
 
-Seed data (`src/main/resources/sql/update.sql`) is applied on first start: two test datasources and one enabled test model.
+Seed data (`src/main/resources/sql/update.sql`) is applied on first start: two test datasources plus dictionaries / system config. No API keys are stored in the repo — add models from the "Models" page.
 
 ## MCP Integration
 
-Endpoint: `http://localhost:8080/mcp` with tools `list_datasources`, `list_tables`, `get_table_schema`, `execute_query`, `execute_update`.
+Endpoint: `http://localhost:8080/mcp` with tools `list_datasources`, `list_tables`, `get_table_schema`, `execute_query`, `execute_update`, `render_chart`.
 
 ```json
 {
@@ -65,10 +70,12 @@ Endpoint: `http://localhost:8080/mcp` with tools `list_datasources`, `list_table
 3. Console: `select * from users` → result card marked as "控制台"
 4. Start a write operation → confirmation card → try both "cancel" and "confirm"
 5. Console: `delete from users where id = -1` → "delete denied" dialog guiding you to System Config
+6. Ask `各状态用户的数量分布` → the result card auto-renders a bar chart tagged "AI 图表"; switch between pie / line and table views
 
 ## Security Notice
 
-The MiniMax test API key (encrypted) and test datasources (`192.168.110.88`) inside `update.sql` are **for local development and demos only**. Replace them with your own credentials and rotate `app.crypto.key` before any real deployment.
+- **Credentials never reach the LLM**: only datasource name / type, schema and query results are visible to the model; tool error messages are masked (users / hosts / passwords / JDBC URLs → `***`) before returning.
+- The test datasources (`192.168.110.88`) inside `update.sql` are **for local development and demos only**; the repository contains no LLM API keys. Replace them with your own credentials and rotate `app.crypto.key` before any real deployment.
 
 ## Development
 
@@ -77,6 +84,10 @@ The MiniMax test API key (encrypted) and test datasources (`192.168.110.88`) ins
 cd frontend && npm install && npm run dev # frontend with proxy to :8080
 ./mvnw test                               # unit tests
 ```
+
+## Logging
+
+Console + rolling file `logs/database-operation-agent.log` (override the directory with `LOG_DIR`); daily + 50MB rotation, 30 days / 1GB cap, gzip archives; business package at DEBUG.
 
 ## License
 

@@ -80,8 +80,12 @@ CREATE TABLE IF NOT EXISTS sql_result (
     source TEXT NOT NULL DEFAULT 'agent',
     status TEXT NOT NULL DEFAULT 'success',
     error_message TEXT,
+    chart_config TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+
+-- 迁移：sql_result 增加 chart_config 列（旧库升级；新库已在建表语句中包含，报 duplicate column 由 continue-on-error 容忍）
+ALTER TABLE sql_result ADD COLUMN chart_config TEXT;
 
 CREATE TABLE IF NOT EXISTS confirm_request (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

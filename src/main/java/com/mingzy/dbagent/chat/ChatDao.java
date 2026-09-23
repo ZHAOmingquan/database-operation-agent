@@ -35,7 +35,7 @@ public class ChatDao {
             rs.getObject("affected_rows") == null ? null : rs.getInt("affected_rows"),
             rs.getObject("elapsed_ms") == null ? null : rs.getLong("elapsed_ms"),
             rs.getString("ai_comment"), rs.getString("source"), rs.getString("status"),
-            rs.getString("error_message"), rs.getString("created_at"));
+            rs.getString("error_message"), rs.getString("chart_config"), rs.getString("created_at"));
 
     private static final RowMapper<ConfirmRequest> CONFIRM_MAPPER = (rs, i) -> new ConfirmRequest(
             rs.getLong("id"), rs.getLong("session_id"),
@@ -115,8 +115,8 @@ public class ChatDao {
         jdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement(
                 "INSERT INTO sql_result(session_id, message_id, datasource_id, datasource_name, sql_text, result_type, " +
-                "columns_json, rows_json, row_count, affected_rows, elapsed_ms, ai_comment, source, status, error_message) " +
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", Statement.RETURN_GENERATED_KEYS);
+                "columns_json, rows_json, row_count, affected_rows, elapsed_ms, ai_comment, source, status, error_message, chart_config) " +
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", Statement.RETURN_GENERATED_KEYS);
             ps.setLong(1, r.sessionId());
             if (r.messageId() == null) ps.setNull(2, java.sql.Types.INTEGER); else ps.setLong(2, r.messageId());
             if (r.datasourceId() == null) ps.setNull(3, java.sql.Types.INTEGER); else ps.setLong(3, r.datasourceId());
@@ -125,7 +125,7 @@ public class ChatDao {
             if (r.affectedRows() == null) ps.setNull(10, java.sql.Types.INTEGER); else ps.setInt(10, r.affectedRows());
             if (r.elapsedMs() == null) ps.setNull(11, java.sql.Types.INTEGER); else ps.setLong(11, r.elapsedMs());
             ps.setString(12, r.aiComment()); ps.setString(13, r.source()); ps.setString(14, r.status());
-            ps.setString(15, r.errorMessage());
+            ps.setString(15, r.errorMessage()); ps.setString(16, r.chartConfig());
             return ps;
         }, kh);
         return key(kh);

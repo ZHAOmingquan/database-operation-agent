@@ -97,7 +97,7 @@ public class SessionController {
                 sql, exec.resultType(), mapper.writeValueAsString(exec.columns()),
                 mapper.writeValueAsString(exec.rows()), exec.rowCount(), exec.affectedRows(),
                 exec.elapsedMs(), null, "console", exec.success() ? "success" : "error",
-                exec.errorMessage(), null));
+                exec.errorMessage(), null, null));
         SqlResult saved = chatDao.findResult(resultId);
         ws.send(id, "result", saved);
         return Result.ok(saved);
