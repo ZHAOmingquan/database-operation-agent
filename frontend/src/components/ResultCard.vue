@@ -15,9 +15,9 @@
       <a-table :columns="columns" :data-source="rows" size="small" :pagination="false"
                :scroll="{ x: 'max-content', y: 160 }" row-key="__rowKey" />
     </template>
-    <div v-if="item.aiComment" class="ai-comment">
+    <div v-if="aiComment" class="ai-comment">
       <a-tag color="geekblue">AI 解读</a-tag>
-      <span>{{ item.aiComment }}</span>
+      <span>{{ aiComment }}</span>
     </div>
   </a-card>
 </template>
@@ -31,6 +31,8 @@ const props = defineProps({ item: { type: Object, required: true } })
 const isQuery = computed(() => props.item.resultType === 'query')
 const statusText = computed(() => props.item.status === 'success' ? '成功' : '失败')
 const statusColor = computed(() => props.item.status === 'success' ? 'green' : 'red')
+// 与 MessageItem 一致：推理模型的 <think>…</think> 思维链不展示
+const aiComment = computed(() => (props.item.aiComment || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim())
 
 const columns = computed(() => {
   const cols = JSON.parse(props.item.columnsJson || '[]')

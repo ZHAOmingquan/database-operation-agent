@@ -5819,9 +5819,9 @@ const execute = async () => {
       <a-table :columns="columns" :data-source="rows" size="small" :pagination="false"
                :scroll="{ x: 'max-content', y: 160 }" row-key="__rowKey" />
     </template>
-    <div v-if="item.aiComment" class="ai-comment">
+    <div v-if="aiComment" class="ai-comment">
       <a-tag color="geekblue">AI 解读</a-tag>
-      <span>{{ item.aiComment }}</span>
+      <span>{{ aiComment }}</span>
     </div>
   </a-card>
 </template>
@@ -5835,6 +5835,8 @@ const props = defineProps({ item: { type: Object, required: true } })
 const isQuery = computed(() => props.item.resultType === 'query')
 const statusText = computed(() => props.item.status === 'success' ? '成功' : '失败')
 const statusColor = computed(() => props.item.status === 'success' ? 'green' : 'red')
+// 与 MessageItem 一致：推理模型的 <think>…</think> 思维链不展示
+const aiComment = computed(() => (props.item.aiComment || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim())
 
 const columns = computed(() => {
   const cols = JSON.parse(props.item.columnsJson || '[]')
@@ -5903,7 +5905,7 @@ const store = useChatStore()
 git add -A && git commit -m "feat: sql console and result panel"
 ```
 
-**实测记录（2026-09-23）：** 3 个组件尚未被页面引用，用 `@vue/compiler-sfc` 编译级验证（parse + compileScript + compileTemplate）均 OK；Task 28 组装后由 vite build 整体校验。
+**实测记录（2026-09-23）：** 3 个组件尚未被页面引用，用 `@vue/compiler-sfc` 编译级验证（parse + compileScript + compileTemplate）均 OK；Task 28 组装后由 vite build 整体校验。（Task 29 验收中发现 AI 解读未剥离 `<think>` 标签，已补 `aiComment` computed，见 Task 29 修复记录。）
 
 ---
 
@@ -6081,6 +6083,21 @@ Expected: 左侧弹出确认卡片（含 SQL + 倒计时）→ 点"取消"→ AI
 ```bash
 git add -A && git commit -m "fix: issues found during e2e acceptance"
 ```
+
+**实测记录（2026-09-23，验收通过）：** 本机 8080 被占用，验收使用 `--server.port=18080`；浏览器验收用 agent-browser（headless Chrome）。流程与结果：
+1. 完整构建：`./mvnw clean package` → 46 tests 全通过，jar 内含 `static/index.html` 与 assets（前后端一体）
+2. 用例 1（`帮我查询用户列表？`）：10s 内出现用户消息 + 助手回答 + 结果卡片 3 张（COUNT 统计 2 行 / sys_user 0 行 / users 10 行，均 source=AI）；刷新页面后消息与卡片全部恢复（历史恢复验证）
+3. 用例 2（`系统有多少用户？`）：新增回答"users 1036 / sys_user 0"统计表 + 新卡片（4 行 · 71ms）
+4. 控制台：`select * from users` → 新卡片 `10 行 · 12ms · 控制台`（source=console 正确，SQL 原样未改写）
+5. 写操作确认：对话触发 `UPDATE users SET status = 1 WHERE id = 395558` → 确认卡片（含 SQL + 60s 倒计时）→ 点"取消"→ AI 回答"更新操作已被您拒绝，未在数据库中执行"；再次发起（id=2030790）点"确认执行"→ 卡片`影响 1 行 · 14ms` + AI 回答"更新成功"
+6. 删除拦截：`developer_mode=false`（默认）下控制台执行 `delete from users …` / `drop table …` → WS `delete_denied` → 弹框"删除操作被拒绝：请开启开发者模式，确保你对删除后果了解（SQL：…）"含"知道了 / 前往系统配置"→ 点"前往系统配置"跳转 `/configs`（含开发者模式开关）；`developer_mode=true` 时删除放行（属预期：开启后才允许删除）
+7. 无数据源闭环（核心需求）：删除全部数据源后提问"系统有多少用户？" → 2s 内弹出新建数据源表单 → 填写（mysql-mytest / 192.168.110.88:3306/mytest / root）→ 保存 → 顶栏自动选中新数据源并**自动重发上次提问** → AI 真实回答（users 1036 / sys_user 0 / users_plain 30264）
+8. MCP：initialize → notifications/initialized（HTTP 202）→ tools/list 返回 5 工具 → tools/call `list_datasources` 返回 mysql-mytest → `list_tables` 返回真实表（accounts/users/sys_user 等）
+9. 验收中发现并修复 3 个问题（Step 6 提交内容）：
+   - `frontend/src/ws/socket.js`：首条消息在 WS CONNECTING 状态被静默丢弃（会话新建后立刻发送可见）→ 加 outbox 队列（CONNECTING 暂存、onopen 按序补发、connect() 重置）
+   - `GlobalExceptionHandler`：补 `NoResourceFoundException` handler（404 语义），消除静态资源缺失时落入兜底导致的 ERROR 栈噪音
+   - `frontend/src/components/ResultCard.vue`：AI 解读未剥离 `<think>…</think>` 推理标签 → 加 `aiComment` computed（与 MessageItem 行为一致）
+10. 环境备注：agent-browser 的 daemon 跨 Bash 命令会漂移 target（eval 落在 about:blank），须将 `open` 与操作链放在同一条命令内执行；验收后会话 1 留有测试数据、数据源 id=7 为验收新建，最终交付前清理 `./data` 重启恢复种子
 
 ---
 
