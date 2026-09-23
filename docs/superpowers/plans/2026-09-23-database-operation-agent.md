@@ -5227,8 +5227,14 @@ class ChatE2eIT {
 ```bash
 rm -rf ./target/test-data
 JAVA_HOME=/opt/apps/org.openjdk-lts/files/openjdk-lts ./mvnw test -Dtest=ChatE2eIT -Pskip-frontend
+# 测试带 @Disabled，实际运行需追加 -Djunit.jupiter.conditions.deactivate='org.junit.*DisabledCondition' 临时启用（无需改代码）
 ```
 Expected: 测试输出中 RESULTS 区含一条 `select ...` 查询（默认 10 行）且 comment 为中文回答；若模型不支持 function calling，记录实际返回并执行降级方案（见第 14 节风险 5）
+
+**实测记录（2026-09-23，真实 MiniMax-M3 + mysql-mytest，通过）：**
+- Tests run: 1, Failures: 0, Errors: 0（19.0s）；真实模型调用生成中文回答（含表格与执行 SQL），实际执行 `SELECT id, name, email, phone, status, created_at FROM users ORDER BY id LIMIT 10`，rows=10
+- 结果落库（source=agent）、ai_comment 回填、messages 持久化均正常（RESULTS 区 comment 为完整中文回答）
+- 观察：MiniMax-M3 回答内容含 `<think>…</think>` 思维链标签原样输出 → 已同步 Task 26 的 MessageItem 增加前端剥离展示（见该任务代码）
 
 - [ ] **Step 3: Commit**
 
@@ -5416,7 +5422,7 @@ git add -A && git commit -m "feat: frontend ws client and chat store"
   <div :class="['msg', msg.role]">
     <div class="bubble">
       <template v-if="msg.role === 'assistant'">
-        <div class="answer">{{ msg.content }}</div>
+        <div class="answer">{{ answer }}</div>
         <a-tag v-if="msg.toolResultIds?.length" color="blue" style="margin-top:6px">
           已执行 {{ msg.toolResultIds.length }} 个 SQL（见右下结果集）
         </a-tag>
@@ -5427,7 +5433,11 @@ git add -A && git commit -m "feat: frontend ws client and chat store"
 </template>
 
 <script setup>
-defineProps({ msg: { type: Object, required: true } })
+import { computed } from 'vue'
+
+const props = defineProps({ msg: { type: Object, required: true } })
+// 推理模型（如 MiniMax-M3）会把 <think>…</think> 思维链原样写进 content，展示时剥离
+const answer = computed(() => (props.msg.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim())
 </script>
 
 <style scoped>
