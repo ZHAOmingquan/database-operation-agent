@@ -2593,7 +2593,7 @@ Expected: 输出 `sk-cp-... -> <base64>`（记下密文）
 ```sql
 -- 测试模型：MiniMax-M3（幂等）
 INSERT INTO ai_model (name, provider, base_url, api_key, model_id, temperature, max_tokens, enabled)
-SELECT 'MiniMax-M3（测试）', 'minimax', 'https://api.minimaxi.com/v1', '<MINIMAX_CIPHER>', 'MiniMax-M3', 0.7, 4096, 1
+SELECT 'MiniMax-M3（测试）', 'minimax', 'https://api.minimaxi.com/v1', 'q6fiYkYPQ/aK8XByPk4db7u5RXnz5CdPJuA+tU1cTTyaSCC/rspZlJJuEU+PR7c/a8osFEVRZtcvuiaQmklIT3sbnV1RoeE9B47DQDJ/YPK6FAM/wXyn7rZiPV//7JSUygsmPz+fQW6ec74w4et0CEeeSOziTbNJzdApiJoROZrcvc/MNpVxiDj3OWopQBfZzJRC03u80pC2', 'MiniMax-M3', 0.7, 4096, 1
 WHERE NOT EXISTS (SELECT 1 FROM ai_model WHERE model_id = 'MiniMax-M3');
 ```
 

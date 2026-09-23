@@ -32,3 +32,8 @@ SELECT 'model_id', k, l, p, s, 1 FROM (
   SELECT 'gpt-4o-mini', 'GPT-4o mini', 'openai', 1 UNION ALL
   SELECT 'qwen2.5:7b', 'Qwen2.5 7B', 'ollama', 1
 ) t WHERE NOT EXISTS (SELECT 1 FROM sys_dict d WHERE d.dict_type='model_id' AND d.dict_key=t.k AND IFNULL(d.parent_key,'')=t.p);
+
+-- 测试模型：MiniMax-M3（幂等）
+INSERT INTO ai_model (name, provider, base_url, api_key, model_id, temperature, max_tokens, enabled)
+SELECT 'MiniMax-M3（测试）', 'minimax', 'https://api.minimaxi.com/v1', 'q6fiYkYPQ/aK8XByPk4db7u5RXnz5CdPJuA+tU1cTTyaSCC/rspZlJJuEU+PR7c/a8osFEVRZtcvuiaQmklIT3sbnV1RoeE9B47DQDJ/YPK6FAM/wXyn7rZiPV//7JSUygsmPz+fQW6ec74w4et0CEeeSOziTbNJzdApiJoROZrcvc/MNpVxiDj3OWopQBfZzJRC03u80pC2', 'MiniMax-M3', 0.7, 4096, 1
+WHERE NOT EXISTS (SELECT 1 FROM ai_model WHERE model_id = 'MiniMax-M3');
