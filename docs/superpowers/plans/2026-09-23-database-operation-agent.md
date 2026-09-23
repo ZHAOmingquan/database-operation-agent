@@ -5031,14 +5031,19 @@ git add -A && git commit -m "feat: chat orchestration with tool loop and confirm
 ```java
 package com.mingzy.dbagent.chat.web;
 
-import com.mingzy.dbagent.chat.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mingzy.dbagent.chat.ChatDao;
+import com.mingzy.dbagent.chat.ChatMessage;
+import com.mingzy.dbagent.chat.ChatSession;
+import com.mingzy.dbagent.chat.SqlResult;
+import com.mingzy.dbagent.chat.WsSessionRegistry;
 import com.mingzy.dbagent.common.Result;
-import com.mingzy.dbagent.datasource.Datasource;
 import com.mingzy.dbagent.datasource.DatasourceService;
+import com.mingzy.dbagent.executor.DeleteGuard;
+import com.mingzy.dbagent.executor.SqlClassifier;
 import com.mingzy.dbagent.executor.SqlExecResult;
 import com.mingzy.dbagent.executor.SqlExecutor;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Value;
+import com.mingzy.dbagent.executor.SqlKind;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -5052,14 +5057,16 @@ public class SessionController {
     private final DatasourceService datasourceService;
     private final SqlExecutor sqlExecutor;
     private final WsSessionRegistry ws;
+    private final DeleteGuard deleteGuard;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public SessionController(ChatDao chatDao, DatasourceService datasourceService,
-                             SqlExecutor sqlExecutor, WsSessionRegistry ws) {
+                             SqlExecutor sqlExecutor, WsSessionRegistry ws, DeleteGuard deleteGuard) {
         this.chatDao = chatDao;
         this.datasourceService = datasourceService;
         this.sqlExecutor = sqlExecutor;
         this.ws = ws;
+        this.deleteGuard = deleteGuard;
     }
 
     @GetMapping
@@ -5094,15 +5101,19 @@ public class SessionController {
     @GetMapping("/{id}/results")
     public Result<List<SqlResult>> results(@PathVariable long id) { return Result.ok(chatDao.listResults(id)); }
 
-    /** SQL 控制台执行：用户手写 SQL，无需确认；结果落库并 WS 推送（source=console） */
+    /** SQL 控制台执行：用户手写 SQL，无需确认；删除类操作仍受开发者模式守卫；结果落库并 WS 推送（source=console） */
     @PostMapping("/{id}/console/execute")
     public Result<SqlResult> consoleExecute(@PathVariable long id, @RequestBody Map<String, Object> body) throws Exception {
         String sql = body.get("sql").toString();
         long datasourceId = Long.parseLong(body.get("datasourceId").toString());
         Integer limit = body.get("limit") == null ? null : Integer.valueOf(body.get("limit").toString());
+        String denied = deleteGuard.checkAllowed(sql);
+        if (denied != null) {
+            ws.send(id, "delete_denied", Map.of("sql", sql, "reason", denied));
+            throw new IllegalArgumentException(denied);
+        }
         DatasourceService.HikariPoolRef ref = datasourceService.poolOf(datasourceService.requireById(datasourceId));
-        boolean isQuery = com.mingzy.dbagent.executor.SqlClassifier.kind(sql)
-                == com.mingzy.dbagent.executor.SqlKind.QUERY;
+        boolean isQuery = SqlClassifier.kind(sql) == SqlKind.QUERY;
         SqlExecResult exec = isQuery
                 ? sqlExecutor.executeQuery(ref.pool(), sql, limit == null ? 10 : limit, 500, 30)
                 : sqlExecutor.executeUpdate(ref.pool(), sql, 30);
@@ -5118,7 +5129,7 @@ public class SessionController {
 }
 ```
 
-（注：`@Value` import 未使用时移除。）
+（注：`@Value` 与 `Datasource` import 未使用已移除，实际实现改为显式 import。`consoleExecute` 接入 Task 22B 的 `DeleteGuard`：删除类 SQL 直接拒绝（WS 推送 `delete_denied` + HTTP Result.error），守卫先于建池，不依赖数据源可达性。）
 
 - [ ] **Step 2: 实现 SPA History 路由转发（前端路由刷新回退）**
 
@@ -5139,7 +5150,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
      */
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
-        for (String path : new String[]{"/chat", "/datasources", "/models", "/dict"}) {
+        for (String path : new String[]{"/chat", "/datasources", "/models", "/dict", "/configs"}) {
             registry.addViewController(path).setViewName("forward:/index.html");
         }
     }
@@ -5150,6 +5161,14 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
 Run: `JAVA_HOME=/opt/apps/org.openjdk-lts/files/openjdk-lts ./mvnw -q -Pskip-frontend -DskipTests compile`
 Expected: BUILD SUCCESS
+
+**实测记录（2026-09-23，默认库 + 18080 端口，全部通过）：**
+- 会话 CRUD：POST /api/sessions 创建（id=1）→ GET 列表 1 条 → PUT 改标题成功回读
+- GET /{id}/messages、GET /{id}/results 初始均返回空列表
+- DeleteGuard 拦截：console 提交 `delete from ...` 与 `DROP TABLE ...` 均返回 code=1「请开启开发者模式，确保你对删除后果了解」（守卫先于建池，未触达数据源）
+- 开发者模式联动：PUT /api/configs/developer_mode 开启后 console `select 1` 在 mysql-mytest（192.168.110.88）真实执行成功（elapsedMs≈30，source=console 结果落库）；关闭后恢复拦截
+- SPA 转发：GET /configs、GET /chat 均返回 index.html
+- 验证数据已清理（DELETE /api/sessions/1），应用已停止
 
 ```bash
 git add -A && git commit -m "feat: session rest api and sql console endpoint"
@@ -5286,7 +5305,8 @@ export const useChatStore = defineStore('chat', {
     thinking: false,
     errors: [],
     lastPrompt: null,     // 最近一次提问，用于“无数据源”引导后自动重发
-    noDatasource: null    // 收到 no_datasource 事件时暂存 payload（{message, hasAnyDatasource}）
+    noDatasource: null,   // 收到 no_datasource 事件时暂存 payload（{message, hasAnyDatasource}）
+    deleteDenied: null    // 收到 delete_denied 事件时暂存 payload（{sql, reason}），供工作台弹框提示
   }),
   actions: {
     async loadSessions() { this.sessions = await sessionApi.list() },
@@ -5315,6 +5335,7 @@ export const useChatStore = defineStore('chat', {
       socket.send({ type: 'user_message', content, datasourceId, modelId })
     },
     clearNoDatasource() { this.noDatasource = null },
+    clearDeleteDenied() { this.deleteDenied = null },
     resendLast(datasourceId) {
       this.noDatasource = null
       if (!this.lastPrompt) return
@@ -5344,6 +5365,10 @@ export const useChatStore = defineStore('chat', {
         case 'confirm_result':
           this.pendingConfirms = this.pendingConfirms.filter((c) => c.id !== p.id)
           this.thinking = true
+          break
+        case 'delete_denied':
+          this.deleteDenied = p
+          this.thinking = false
           break
         case 'no_datasource':
           this.noDatasource = p
@@ -5748,7 +5773,7 @@ const execute = async () => {
   try {
     const sessionId = await store.ensureSession(datasourceId.value)
     await sessionApi.consoleExecute(sessionId, { sql: sql.value, datasourceId: datasourceId.value, limit: limit.value })
-  } finally { running.value = false }
+  } catch { /* 失败提示：axios 拦截器 message.error + delete_denied 弹框，此处不重复处理 */ } finally { running.value = false }
 }
 </script>
 
@@ -5903,7 +5928,8 @@ git add -A && git commit -m "feat: sql console and result panel"
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
+import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import { datasourceApi, modelApi } from '../api'
 import ChatPanel from '../components/ChatPanel.vue'
@@ -5912,6 +5938,7 @@ import ResultPanel from '../components/ResultPanel.vue'
 import DatasourceFormModal from '../components/DatasourceFormModal.vue'
 
 const store = useChatStore()
+const router = useRouter()
 const currentSessionId = ref(undefined)
 const datasourceId = ref(undefined)
 const modelId = ref(undefined)
@@ -5949,6 +5976,19 @@ watch(() => store.noDatasource, (v) => {
   if (!v) return
   if (v.hasAnyDatasource) { message.warning('请先在顶部选择数据源'); store.clearNoDatasource(); return }
   dsModalOpen.value = true
+})
+
+// 删除拦截提示：DeleteGuard 拒绝删除类操作时弹框（对话与控制台共用），含前往系统配置入口
+watch(() => store.deleteDenied, (v) => {
+  if (!v) return
+  Modal.confirm({
+    title: '删除操作被拒绝',
+    content: `${v.reason}（SQL：${v.sql}）`,
+    okText: '前往系统配置',
+    cancelText: '知道了',
+    onOk: () => { router.push('/configs') }
+  })
+  store.clearDeleteDenied()
 })
 
 const onDatasourceSaved = async (ds) => {
