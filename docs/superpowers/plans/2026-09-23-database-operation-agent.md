@@ -2945,7 +2945,7 @@ public final class LimitInjector {
 - [ ] **Step 3: 运行测试通过 + Commit**
 
 Run: `JAVA_HOME=/opt/apps/org.openjdk-lts/files/openjdk-lts ./mvnw test -Dtest='SqlClassifierTest,LimitInjectorTest' -Pskip-frontend`
-Expected: PASS（合计 9 tests）
+Expected: PASS（合计 7 tests）
 
 ```bash
 git add -A && git commit -m "feat: sql classifier and limit injector"
