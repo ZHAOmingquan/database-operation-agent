@@ -2,6 +2,7 @@ package com.mingzy.dbagent.tool;
 
 import com.mingzy.dbagent.datasource.Datasource;
 import com.mingzy.dbagent.datasource.DatasourceService;
+import com.mingzy.dbagent.executor.DeleteGuard;
 import com.mingzy.dbagent.executor.SqlExecResult;
 import com.mingzy.dbagent.executor.SqlExecutor;
 import com.mingzy.dbagent.metadata.MetadataServiceRouter;
@@ -26,6 +27,7 @@ public class DatabaseTools implements ToolCallbackProvider {
     private final SqlExecutor executor;
     private final MetadataServiceRouter metadata;
     private final ToolTraceRegistry traces;
+    private final DeleteGuard deleteGuard;
     private final int defaultLimit;
     private final int maxResultRows;
     private final int queryTimeout;
@@ -37,6 +39,8 @@ public class DatabaseTools implements ToolCallbackProvider {
         String onQuery(long sessionId, long datasourceId, String datasourceName, String sql, SqlExecResult result, String traceIdStr);
         /** 写操作：内部会话返回 null 表示已确认可执行；返回非 null 为拒绝/超时原因；MCP 通道直接执行 */
         String confirmWrite(long sessionId, long datasourceId, String datasourceName, String sql, Long traceId);
+        /** 删除类操作被开发者模式守卫拦截时的通知（仅内部会话触发；MCP 无会话不触发） */
+        default void onDenied(long sessionId, String sql, String reason) {}
     }
 
     private SessionHook sessionHook;
@@ -44,7 +48,7 @@ public class DatabaseTools implements ToolCallbackProvider {
     public void setSessionHook(SessionHook sessionHook) { this.sessionHook = sessionHook; }
 
     public DatabaseTools(DatasourceService datasourceService, SqlExecutor executor,
-                         MetadataServiceRouter metadata, ToolTraceRegistry traces,
+                         MetadataServiceRouter metadata, ToolTraceRegistry traces, DeleteGuard deleteGuard,
                          @Value("${app.sql.default-limit:10}") int defaultLimit,
                          @Value("${app.sql.max-result-rows:500}") int maxResultRows,
                          @Value("${app.sql.query-timeout-seconds:30}") int queryTimeout) {
@@ -52,6 +56,7 @@ public class DatabaseTools implements ToolCallbackProvider {
         this.executor = executor;
         this.metadata = metadata;
         this.traces = traces;
+        this.deleteGuard = deleteGuard;
         this.defaultLimit = defaultLimit;
         this.maxResultRows = maxResultRows;
         this.queryTimeout = queryTimeout;
@@ -141,11 +146,19 @@ public class DatabaseTools implements ToolCallbackProvider {
         }
     }
 
-    @Tool(name = "execute_update", description = "在指定数据源上执行写入/DDL（INSERT/UPDATE/DELETE/CREATE/ALTER/DROP 等）。内部会话中此操作需要用户在界面确认后才真正执行；MCP 外部调用请由客户端确认。")
+    @Tool(name = "execute_update", description = "在指定数据源上执行写入/DDL（INSERT/UPDATE/DELETE/CREATE/ALTER/DROP 等）。删除类操作（DELETE/DROP/TRUNCATE）需先开启开发者模式；内部会话中写操作需用户在界面确认后才真正执行；MCP 外部调用请由客户端确认。")
     public String executeUpdate(@ToolParam(description = "数据源名称") String datasourceName,
                                 @ToolParam(description = "SQL 语句") String sql,
                                 ToolContext toolContext) {
         try {
+            String denied = deleteGuard.checkAllowed(sql);
+            if (denied != null) {
+                Long sid = sessionIdOf(toolContext);
+                if (sid != null && sessionHook != null) {
+                    sessionHook.onDenied(sid, sql, denied);
+                }
+                return "操作被拒绝：" + denied;
+            }
             DatasourceService.HikariPoolRef ref = poolOf(datasourceName);
             if (ref.datasource().readOnly()) {
                 return "数据源 " + datasourceName + " 配置为只读，已拒绝写操作";

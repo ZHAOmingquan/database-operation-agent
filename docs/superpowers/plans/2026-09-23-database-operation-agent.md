@@ -4673,12 +4673,13 @@ SessionHook 新增默认方法（不破坏既有实现）：
 /** 删除类操作被开发者模式守卫拦截时的通知（仅内部会话触发；MCP 无会话不触发） */
 default void onDenied(long sessionId, String sql, String reason) {}
 ```
-DatabaseTools 构造器新增 `DeleteGuard deleteGuard` 参数（存储字段）；`executeUpdate` 在只读检查之后、confirmWrite 之前插入：
+DatabaseTools 构造器新增 `DeleteGuard deleteGuard` 参数（存储字段）；`executeUpdate` 在方法最前（建池/只读检查之前）插入（设计调整：守卫拦截属于策略检查，不依赖数据源连接可达性——放在 `poolOf` 之前可对不可达数据源直接返回开发者模式提示，并使单测无需真实库）：
 ```java
 String denied = deleteGuard.checkAllowed(sql);
 if (denied != null) {
-    if (sessionId != null && sessionHook != null) {
-        sessionHook.onDenied(sessionId, sql, denied);
+    Long sid = sessionIdOf(toolContext);
+    if (sid != null && sessionHook != null) {
+        sessionHook.onDenied(sid, sql, denied);
     }
     return "操作被拒绝：" + denied;
 }
@@ -4713,6 +4714,11 @@ git add -A && git commit -m "feat: developer-mode guard blocks delete operations
 ```
 
 （说明：WS 推送 `delete_denied` 事件的 ChatService 实现属 Task 22；SQL 控制台执行接口在 Task 23 接入同一 DeleteGuard；前端弹框在 Task 24 实现。）
+
+**实测记录（验证通过）：** `JAVA_HOME=/opt/apps/org.openjdk-lts/files/openjdk-lts ./mvnw test -Dtest='SqlClassifierTest,DeleteGuardTest,DatabaseToolsTest' -Pskip-frontend` 12 tests 全绿；全量 `./mvnw test -Pskip-frontend` 46 tests 全绿（BUILD SUCCESS）。要点：
+- 守卫检查位于 `executeUpdate` 最前：`deleteBlockedWithoutDeveloperMode` 使用不可达数据源（127.0.0.1:3306）无需建池即返回“操作被拒绝：请开启开发者模式，确保你对删除后果了解”。
+- `insertNotAffectedByDeveloperMode`：insert 放行后走到建池（日志出现 `ds-demo2 - Starting...`），Hikari 对不可达端口（127.0.0.1:1）初始化失败返回“执行失败:”，断言 `doesNotContain("开发者模式")` 成立。
+- 生产装配由 Spring 注入 `DeleteGuard`（`@Component`），无需额外配置；`SessionHook.onDenied` 为 default 方法，MCP 巡检（无会话）不触发。
 
 ---
 

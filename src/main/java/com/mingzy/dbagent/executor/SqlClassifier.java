@@ -9,6 +9,8 @@ public final class SqlClassifier {
             "select", "with", "show", "desc", "describe", "explain", "pragma", "values");
     private static final Set<String> DDL_KEYWORDS = Set.of(
             "create", "drop", "alter", "rename");
+    private static final Set<String> DELETE_KEYWORDS = Set.of(
+            "delete", "drop", "truncate");
 
     private static final Pattern LINE_COMMENT = Pattern.compile("--[^\n]*|#[^\n]*");
     private static final Pattern BLOCK_COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
@@ -23,6 +25,13 @@ public final class SqlClassifier {
         if (QUERY_KEYWORDS.contains(first)) return SqlKind.QUERY;
         if (DDL_KEYWORDS.contains(first)) return SqlKind.DDL;
         return SqlKind.WRITE; // insert/update/delete/truncate/merge/未知默认按写处理
+    }
+
+    /** 是否为删除类操作（DELETE / DROP / TRUNCATE）——受开发者模式守卫 */
+    public static boolean isDeleteLike(String sql) {
+        String cleaned = stripComments(sql).trim();
+        if (cleaned.isEmpty()) return false;
+        return DELETE_KEYWORDS.contains(firstWord(cleaned));
     }
 
     static String stripComments(String sql) {

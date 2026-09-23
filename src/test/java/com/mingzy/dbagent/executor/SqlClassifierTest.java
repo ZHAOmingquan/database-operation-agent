@@ -36,4 +36,17 @@ class SqlClassifierTest {
     void unknownDefaultsToWrite() {
         assertThat(SqlClassifier.kind("vacuum")).isEqualTo(SqlKind.WRITE);
     }
+
+    @Test
+    void deleteLikeDetection() {
+        assertThat(SqlClassifier.isDeleteLike("delete from t")).isTrue();
+        assertThat(SqlClassifier.isDeleteLike("DELETE FROM t WHERE id=1")).isTrue();
+        assertThat(SqlClassifier.isDeleteLike("drop table t")).isTrue();
+        assertThat(SqlClassifier.isDeleteLike("truncate table t")).isTrue();
+        assertThat(SqlClassifier.isDeleteLike("-- 注释\ndelete from t")).isTrue();
+        assertThat(SqlClassifier.isDeleteLike("/* c */ DROP TABLE t")).isTrue();
+        assertThat(SqlClassifier.isDeleteLike("insert into t values(1)")).isFalse();
+        assertThat(SqlClassifier.isDeleteLike("update t set a=1")).isFalse();
+        assertThat(SqlClassifier.isDeleteLike("select * from t")).isFalse();
+    }
 }
