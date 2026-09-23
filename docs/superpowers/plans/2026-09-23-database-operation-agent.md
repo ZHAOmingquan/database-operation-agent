@@ -6124,17 +6124,21 @@ Expected: BUILD SUCCESS，日志显示所有单测通过
 git add -A && git commit -m "docs: initialize README with architecture, quickstart and MCP guide"
 ```
 
+**实测记录（2026-09-23）：** README.md 按计划要求重写（项目简介与功能清单、ASCII 架构图、技术栈版本表、快速开始、页面配置说明、MCP 接入与 curl 自测、验收用例 5 条、测试密钥警示、开发指南、目录结构），README.en.md 重写为简版英文。最终全量构建：`./mvnw clean package` → 46 tests 全通过、前端 13 resources 复制进 static、jar 打包成功（BUILD SUCCESS，21.4s）；unzip 确认 jar 内含 static/index.html 与各视图 chunks。交付前已停止验收应用、清理 `./data`（下次启动自动恢复种子）。
+
 ---
 
 ## 附录 A：验收清单对照（Definition of Done）
 
-- [ ] `./mvnw clean package` 一条命令产出含前端的可运行 jar（Task 29 Step 1）
-- [ ] 数据源管理：MySQL/PostgreSQL 增删改查、测试连接、只读开关（Task 7/8/9）
-- [ ] 模型管理：配置/启用；厂商→模型ID 联动下拉（Task 12/13/14）
-- [ ] 工具对内（ChatClient）与对外（/mcp）均可用（Task 19/22/29）
-- [ ] 会话：WS、确认卡片、SQL 控制台、结果集、历史持久化（Task 21-29）
-- [ ] 验收用例 1、2 通过（Task 29）
-- [ ] README 完成（Task 30）
+- [x] `./mvnw clean package` 一条命令产出含前端的可运行 jar（Task 29 Step 1）
+- [x] 数据源管理：MySQL/PostgreSQL 增删改查、测试连接、只读开关（Task 7/8/9）
+- [x] 模型管理：配置/启用；厂商→模型ID 联动下拉（Task 12/13/14）
+- [x] 工具对内（ChatClient）与对外（/mcp）均可用（Task 19/22/29）
+- [x] 会话：WS、确认卡片、SQL 控制台、结果集、历史持久化（Task 21-29）
+- [x] 验收用例 1、2 通过（Task 29）
+- [x] README 完成（Task 30）
+- [x] 无数据源提问引导新建数据源闭环（Task 22/25/26A/28/29）
+- [x] 开发者模式删除拦截前后端闭环（Task 22B/25/27/29）
 
 ## 附录 B：执行注意事项
 
