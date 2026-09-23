@@ -5401,6 +5401,8 @@ export const useChatStore = defineStore('chat', {
 Run: `cd frontend && npm run build`（或等 Task 29 统一构建验证）
 Expected: 构建通过
 
+**实测记录（2026-09-23）：** `npm run build` 通过（vite ✓ built in 1.04s；store/ws 尚未被页面引用，未进入产物属预期，Task 28 接入后打入 ChatView chunk）
+
 - [ ] **Step 4: Commit**
 
 ```bash
