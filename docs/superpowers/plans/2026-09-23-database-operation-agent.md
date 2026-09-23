@@ -5903,6 +5903,8 @@ const store = useChatStore()
 git add -A && git commit -m "feat: sql console and result panel"
 ```
 
+**实测记录（2026-09-23）：** 3 个组件尚未被页面引用，用 `@vue/compiler-sfc` 编译级验证（parse + compileScript + compileTemplate）均 OK；Task 28 组装后由 vite build 整体校验。
+
 ---
 
 ### Task 28: ChatView 组装（顶栏 + 三栏布局 + 历史恢复）
