@@ -3769,6 +3769,12 @@ git add -A && git commit -m "test: verify mcp streamable http endpoint exposes t
 
 （若握手路径/协议头与实现不符：以 `spring-ai` 实际行为为准调整 curl 命令，不允许修改工具与 Server 暴露方式；验收标准是 MCP 官方 Inspector 或 curl 能列出并调用 5 个工具。）
 
+**实测记录（验证通过，未修改任何实现代码）：** 本机 8080 被其他进程占用，验证使用 `--server.port=18080`。实际流程与要点：
+1. initialize 后用 `-w` 提取会话头：`SID=$(curl -s -o /dev/null -w '%header{Mcp-Session-Id}' -X POST http://localhost:18080/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}')`（`-i/-D/-v` 方式显示该响应头异常，`-w` 可稳定提取）
+2. 先发 `notifications/initialized`（无 id，返回 HTTP 202），否则后续请求报 "Session ID missing"
+3. tools/list 与 tools/call 响应为 SSE 格式（`event: message` + 单行 `data: {...}` JSON），用 `sed -n 's/^data://p'` 提取 JSON
+4. 实测结果：initialize 返回 `serverInfo.name=database-operation-agent`；tools/list 返回 5 个工具；tools/call `list_datasources` 返回 mysql-mytest 与 pg-mytest；tools/call `list_tables`（mysql-mytest）返回真实库 16 张表（含 users）
+
 ---
 
 ### Task 20: 会话域数据模型与 DAO
