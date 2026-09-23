@@ -34,6 +34,9 @@ public class AiModelService {
     }
 
     public AiModel create(AiModel m) {
+        if (dao.findByName(m.name()) != null) {
+            throw new IllegalArgumentException("模型名称已存在: " + m.name());
+        }
         long id = dao.insert(new AiModel(null, m.name(), m.provider(), m.baseUrl(),
                 aes.encrypt(m.apiKey()), m.modelId(), m.temperature(), m.maxTokens(), false, null, null));
         return requireById(id);
@@ -41,6 +44,10 @@ public class AiModelService {
 
     public AiModel update(long id, AiModel m) {
         AiModel old = requireById(id);
+        AiModel byName = dao.findByName(m.name());
+        if (byName != null && !byName.id().equals(id)) {
+            throw new IllegalArgumentException("模型名称已存在: " + m.name());
+        }
         String apiKey = (m.apiKey() == null || m.apiKey().isBlank()) ? old.apiKey() : aes.encrypt(m.apiKey());
         dao.update(new AiModel(id, m.name(), m.provider(), m.baseUrl(), apiKey, m.modelId(),
                 m.temperature(), m.maxTokens(), old.enabled(), null, null));

@@ -550,6 +550,9 @@ CREATE TABLE IF NOT EXISTS ai_model (
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
+-- 模型名称唯一（update.sql 幂等种子依赖）
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_model_name ON ai_model(name);
+
 CREATE TABLE IF NOT EXISTS sys_dict (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     dict_type TEXT NOT NULL,
@@ -560,6 +563,9 @@ CREATE TABLE IF NOT EXISTS sys_dict (
     enabled INTEGER NOT NULL DEFAULT 1,
     UNIQUE (dict_type, dict_key, parent_key)
 );
+
+-- parent_key 可为 NULL，IFNULL 归一化后保证 (dict_type, dict_key, parent_key) 在 NULL 场景下仍唯一（update.sql 幂等种子依赖）
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_dict_identity ON sys_dict(dict_type, dict_key, IFNULL(parent_key, ''));
 
 CREATE TABLE IF NOT EXISTS chat_session (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1727,14 +1733,12 @@ Expected: 输出两行 `Aa123456. -> <base64>`（每次运行密文不同，任�
 
 `src/main/resources/sql/update.sql`（`<MYSQL_CIPHER>`/`<PG_CIPHER>` 替换为 Step 1 实际输出）:
 ```sql
--- 测试数据源种子（幂等）
-INSERT INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
-SELECT 'mysql-mytest', 'mysql', '192.168.110.88', 3306, 'mytest', 'root', '<MYSQL_CIPHER>', 0
-WHERE NOT EXISTS (SELECT 1 FROM ds_datasource WHERE name = 'mysql-mytest');
+-- 测试数据源种子（INSERT OR IGNORE 依赖 ds_datasource.name 的 UNIQUE 约束）
+INSERT OR IGNORE INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
+VALUES ('mysql-mytest', 'mysql', '192.168.110.88', 3306, 'mytest', 'root', '<MYSQL_CIPHER>', 0);
 
-INSERT INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
-SELECT 'pg-mytest', 'postgresql', '192.168.110.88', 5432, 'mytest', 'ming', '<PG_CIPHER>', 0
-WHERE NOT EXISTS (SELECT 1 FROM ds_datasource WHERE name = 'pg-mytest');
+INSERT OR IGNORE INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
+VALUES ('pg-mytest', 'postgresql', '192.168.110.88', 5432, 'mytest', 'ming', '<PG_CIPHER>', 0);
 ```
 
 - [ ] **Step 3: 验证（重启后解锁密码成功 + 实测两个数据库连接，需 192.168.110.88 可达）**
@@ -1774,6 +1778,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DictServiceTest {
 
@@ -1808,6 +1813,14 @@ class DictServiceTest {
         service.save(item.id(), new DictItem(item.id(), "model_id", "MiniMax-M3", "MiniMax M3（新）", "minimax", 5, false));
         assertThat(service.modelIds("minimax")).isEmpty();  // disabled 被过滤
         assertThat(service.list("model_id", "minimax", null)).hasSize(1); // 管理列表仍可见
+    }
+
+    @Test
+    void duplicateRejected() {
+        assertThatThrownBy(() -> service.save(null,
+                new DictItem(null, "model_id", "MiniMax-M3", "MiniMax M3 重复", "minimax", 9, true)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("已存在");
     }
 }
 ```
@@ -1909,6 +1922,11 @@ public class DictService {
     }
 
     public DictItem save(Long id, DictItem item) {
+        boolean duplicate = dao.find(item.dictType(), null, null).stream()
+                .anyMatch(d -> d.dictKey().equals(item.dictKey())
+                        && java.util.Objects.equals(d.parentKey(), item.parentKey())
+                        && (id == null || !d.id().equals(id)));
+        if (duplicate) throw new IllegalArgumentException("字典项已存在: " + item.dictKey());
         if (id == null) {
             return dao.findById(dao.insert(item));
         }
@@ -2078,30 +2096,26 @@ onMounted(load)
 - [ ] **Step 3: 追加字典种子到 update.sql**
 
 ```sql
--- 模型厂商字典（幂等）
-INSERT INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled)
-SELECT 'model_provider', k, l, NULL, s, 1 FROM (
-  SELECT 'minimax' k, 'MiniMax' l, 1 s UNION ALL
-  SELECT 'deepseek', 'DeepSeek', 2 UNION ALL
-  SELECT 'qwen', '通义千问', 3 UNION ALL
-  SELECT 'zhipu', '智谱 GLM', 4 UNION ALL
-  SELECT 'openai', 'OpenAI', 5 UNION ALL
-  SELECT 'ollama', 'Ollama（本地）', 6
-) t WHERE NOT EXISTS (SELECT 1 FROM sys_dict d WHERE d.dict_type='model_provider' AND d.dict_key=t.k);
+-- 模型厂商字典
+INSERT OR IGNORE INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled) VALUES
+  ('model_provider', 'minimax', 'MiniMax', NULL, 1, 1),
+  ('model_provider', 'deepseek', 'DeepSeek', NULL, 2, 1),
+  ('model_provider', 'qwen', '通义千问', NULL, 3, 1),
+  ('model_provider', 'zhipu', '智谱 GLM', NULL, 4, 1),
+  ('model_provider', 'openai', 'OpenAI', NULL, 5, 1),
+  ('model_provider', 'ollama', 'Ollama（本地）', NULL, 6, 1);
 
--- 模型ID字典（幂等，parent_key 为厂商）
-INSERT INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled)
-SELECT 'model_id', k, l, p, s, 1 FROM (
-  SELECT 'MiniMax-M3' k, 'MiniMax-M3' l, 'minimax' p, 1 s UNION ALL
-  SELECT 'MiniMax-Text-01', 'MiniMax-Text-01', 'minimax', 2 UNION ALL
-  SELECT 'deepseek-chat', 'DeepSeek Chat', 'deepseek', 1 UNION ALL
-  SELECT 'deepseek-reasoner', 'DeepSeek Reasoner', 'deepseek', 2 UNION ALL
-  SELECT 'qwen-plus', 'Qwen Plus', 'qwen', 1 UNION ALL
-  SELECT 'qwen-max', 'Qwen Max', 'qwen', 2 UNION ALL
-  SELECT 'glm-4-plus', 'GLM-4-Plus', 'zhipu', 1 UNION ALL
-  SELECT 'gpt-4o-mini', 'GPT-4o mini', 'openai', 1 UNION ALL
-  SELECT 'qwen2.5:7b', 'Qwen2.5 7B', 'ollama', 1
-) t WHERE NOT EXISTS (SELECT 1 FROM sys_dict d WHERE d.dict_type='model_id' AND d.dict_key=t.k AND IFNULL(d.parent_key,'')=t.p);
+-- 模型ID字典（parent_key 为厂商；INSERT OR IGNORE 依赖 ux_sys_dict_identity 唯一索引）
+INSERT OR IGNORE INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled) VALUES
+  ('model_id', 'MiniMax-M3', 'MiniMax-M3', 'minimax', 1, 1),
+  ('model_id', 'MiniMax-Text-01', 'MiniMax-Text-01', 'minimax', 2, 1),
+  ('model_id', 'deepseek-chat', 'DeepSeek Chat', 'deepseek', 1, 1),
+  ('model_id', 'deepseek-reasoner', 'DeepSeek Reasoner', 'deepseek', 2, 1),
+  ('model_id', 'qwen-plus', 'Qwen Plus', 'qwen', 1, 1),
+  ('model_id', 'qwen-max', 'Qwen Max', 'qwen', 2, 1),
+  ('model_id', 'glm-4-plus', 'GLM-4-Plus', 'zhipu', 1, 1),
+  ('model_id', 'gpt-4o-mini', 'GPT-4o mini', 'openai', 1, 1),
+  ('model_id', 'qwen2.5:7b', 'Qwen2.5 7B', 'ollama', 1, 1);
 ```
 
 - [ ] **Step 4: 验证**
@@ -2140,6 +2154,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AiModelServiceTest {
 
@@ -2190,6 +2205,14 @@ class AiModelServiceTest {
         AiModel stored = dao.findById(a.id());
         assertThat(stored.name()).isEqualTo("A2");
         assertThat(service.decryptApiKey(stored)).isEqualTo("sk-old");
+    }
+
+    @Test
+    void duplicateNameRejected() {
+        service.create(new AiModel(null, "A", "minimax", "u", "k", "model-a", 0.7, 100, false, null, null));
+        assertThatThrownBy(() -> service.create(new AiModel(null, "A", "deepseek", "u2", "k2", "model-b", 0.7, 100, false, null, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("已存在");
     }
 }
 ```
@@ -2260,6 +2283,11 @@ public class AiModelDao {
         return l.isEmpty() ? null : l.get(0);
     }
 
+    public AiModel findByName(String name) {
+        List<AiModel> l = jdbc.query("SELECT * FROM ai_model WHERE name=?", MAPPER, name);
+        return l.isEmpty() ? null : l.get(0);
+    }
+
     public List<AiModel> findAll() { return jdbc.query("SELECT * FROM ai_model ORDER BY id", MAPPER); }
 
     public void disableAll() { jdbc.update("UPDATE ai_model SET enabled=0 WHERE enabled=1"); }
@@ -2304,6 +2332,9 @@ public class AiModelService {
     }
 
     public AiModel create(AiModel m) {
+        if (dao.findByName(m.name()) != null) {
+            throw new IllegalArgumentException("模型名称已存在: " + m.name());
+        }
         long id = dao.insert(new AiModel(null, m.name(), m.provider(), m.baseUrl(),
                 aes.encrypt(m.apiKey()), m.modelId(), m.temperature(), m.maxTokens(), false, null, null));
         return requireById(id);
@@ -2311,6 +2342,10 @@ public class AiModelService {
 
     public AiModel update(long id, AiModel m) {
         AiModel old = requireById(id);
+        AiModel byName = dao.findByName(m.name());
+        if (byName != null && !byName.id().equals(id)) {
+            throw new IllegalArgumentException("模型名称已存在: " + m.name());
+        }
         String apiKey = (m.apiKey() == null || m.apiKey().isBlank()) ? old.apiKey() : aes.encrypt(m.apiKey());
         dao.update(new AiModel(id, m.name(), m.provider(), m.baseUrl(), apiKey, m.modelId(),
                 m.temperature(), m.maxTokens(), old.enabled(), null, null));
@@ -2353,7 +2388,7 @@ public class AiModelService {
 - [ ] **Step 3: 运行测试通过 + Commit**
 
 Run: `JAVA_HOME=/opt/apps/org.openjdk-lts/files/openjdk-lts ./mvnw test -Dtest=AiModelServiceTest -Pskip-frontend`
-Expected: PASS（3 tests）
+Expected: PASS（4 tests）
 
 ```bash
 git add -A && git commit -m "feat: ai model management with mutual-exclusive enable"
@@ -2591,10 +2626,9 @@ Expected: 输出 `sk-cp-... -> <base64>`（记下密文）
 - [ ] **Step 2: 追加种子模型到 update.sql（enabled=1）**
 
 ```sql
--- 测试模型：MiniMax-M3（幂等）
-INSERT INTO ai_model (name, provider, base_url, api_key, model_id, temperature, max_tokens, enabled)
-SELECT 'MiniMax-M3（测试）', 'minimax', 'https://api.minimaxi.com/v1', 'q6fiYkYPQ/aK8XByPk4db7u5RXnz5CdPJuA+tU1cTTyaSCC/rspZlJJuEU+PR7c/a8osFEVRZtcvuiaQmklIT3sbnV1RoeE9B47DQDJ/YPK6FAM/wXyn7rZiPV//7JSUygsmPz+fQW6ec74w4et0CEeeSOziTbNJzdApiJoROZrcvc/MNpVxiDj3OWopQBfZzJRC03u80pC2', 'MiniMax-M3', 0.7, 4096, 1
-WHERE NOT EXISTS (SELECT 1 FROM ai_model WHERE model_id = 'MiniMax-M3');
+-- 测试模型：MiniMax-M3（INSERT OR IGNORE 依赖 ux_ai_model_name 唯一索引）
+INSERT OR IGNORE INTO ai_model (name, provider, base_url, api_key, model_id, temperature, max_tokens, enabled)
+VALUES ('MiniMax-M3（测试）', 'minimax', 'https://api.minimaxi.com/v1', 'q6fiYkYPQ/aK8XByPk4db7u5RXnz5CdPJuA+tU1cTTyaSCC/rspZlJJuEU+PR7c/a8osFEVRZtcvuiaQmklIT3sbnV1RoeE9B47DQDJ/YPK6FAM/wXyn7rZiPV//7JSUygsmPz+fQW6ec74w4et0CEeeSOziTbNJzdApiJoROZrcvc/MNpVxiDj3OWopQBfZzJRC03u80pC2', 'MiniMax-M3', 0.7, 4096, 1);
 ```
 
 - [ ] **Step 3: 实现 ModelView.vue（联动下拉 + 启用互斥 + 测试连接）**

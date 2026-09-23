@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AiModelServiceTest {
 
@@ -57,5 +58,13 @@ class AiModelServiceTest {
         AiModel stored = dao.findById(a.id());
         assertThat(stored.name()).isEqualTo("A2");
         assertThat(service.decryptApiKey(stored)).isEqualTo("sk-old");
+    }
+
+    @Test
+    void duplicateNameRejected() {
+        service.create(new AiModel(null, "A", "minimax", "u", "k", "model-a", 0.7, 100, false, null, null));
+        assertThatThrownBy(() -> service.create(new AiModel(null, "A", "deepseek", "u2", "k2", "model-b", 0.7, 100, false, null, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("已存在");
     }
 }

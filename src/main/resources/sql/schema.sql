@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS ai_model (
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
+-- 模型名称唯一（update.sql 幂等种子依赖）
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_model_name ON ai_model(name);
+
 CREATE TABLE IF NOT EXISTS sys_dict (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     dict_type TEXT NOT NULL,
@@ -37,6 +40,9 @@ CREATE TABLE IF NOT EXISTS sys_dict (
     enabled INTEGER NOT NULL DEFAULT 1,
     UNIQUE (dict_type, dict_key, parent_key)
 );
+
+-- parent_key 可为 NULL，IFNULL 归一化后保证 (dict_type, dict_key, parent_key) 在 NULL 场景下仍唯一（update.sql 幂等种子依赖）
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_dict_identity ON sys_dict(dict_type, dict_key, IFNULL(parent_key, ''));
 
 CREATE TABLE IF NOT EXISTS chat_session (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

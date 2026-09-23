@@ -1,39 +1,32 @@
--- update.sql: 幂等种子数据（可重复执行；spring.sql.init data-locations）
+-- update.sql: 幂等种子数据（INSERT OR IGNORE 依赖 schema.sql 中的唯一索引；可重复执行）
 -- 测试数据源（密码为 app.crypto.key 对应的 AES-GCM 密文）
-INSERT INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
-SELECT 'mysql-mytest', 'mysql', '192.168.110.88', 3306, 'mytest', 'root', 'WctOK9OPwM0V3/xuOtGpmalCk6wmFk1GKCVdeexwlUGlHJX+tg==', 0
-WHERE NOT EXISTS (SELECT 1 FROM ds_datasource WHERE name = 'mysql-mytest');
+INSERT OR IGNORE INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
+VALUES ('mysql-mytest', 'mysql', '192.168.110.88', 3306, 'mytest', 'root', 'WctOK9OPwM0V3/xuOtGpmalCk6wmFk1GKCVdeexwlUGlHJX+tg==', 0);
 
-INSERT INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
-SELECT 'pg-mytest', 'postgresql', '192.168.110.88', 5432, 'mytest', 'ming', 'EQwg/Yi9ubfNUZua7ksBWQS13vnr9RHBEfZFCoqbC6fKo3iUbA==', 0
-WHERE NOT EXISTS (SELECT 1 FROM ds_datasource WHERE name = 'pg-mytest');
+INSERT OR IGNORE INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
+VALUES ('pg-mytest', 'postgresql', '192.168.110.88', 5432, 'mytest', 'ming', 'EQwg/Yi9ubfNUZua7ksBWQS13vnr9RHBEfZFCoqbC6fKo3iUbA==', 0);
 
--- 模型厂商字典（幂等）
-INSERT INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled)
-SELECT 'model_provider', k, l, NULL, s, 1 FROM (
-  SELECT 'minimax' k, 'MiniMax' l, 1 s UNION ALL
-  SELECT 'deepseek', 'DeepSeek', 2 UNION ALL
-  SELECT 'qwen', '通义千问', 3 UNION ALL
-  SELECT 'zhipu', '智谱 GLM', 4 UNION ALL
-  SELECT 'openai', 'OpenAI', 5 UNION ALL
-  SELECT 'ollama', 'Ollama（本地）', 6
-) t WHERE NOT EXISTS (SELECT 1 FROM sys_dict d WHERE d.dict_type='model_provider' AND d.dict_key=t.k);
+-- 模型厂商字典
+INSERT OR IGNORE INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled) VALUES
+  ('model_provider', 'minimax', 'MiniMax', NULL, 1, 1),
+  ('model_provider', 'deepseek', 'DeepSeek', NULL, 2, 1),
+  ('model_provider', 'qwen', '通义千问', NULL, 3, 1),
+  ('model_provider', 'zhipu', '智谱 GLM', NULL, 4, 1),
+  ('model_provider', 'openai', 'OpenAI', NULL, 5, 1),
+  ('model_provider', 'ollama', 'Ollama（本地）', NULL, 6, 1);
 
--- 模型ID字典（幂等，parent_key 为厂商）
-INSERT INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled)
-SELECT 'model_id', k, l, p, s, 1 FROM (
-  SELECT 'MiniMax-M3' k, 'MiniMax-M3' l, 'minimax' p, 1 s UNION ALL
-  SELECT 'MiniMax-Text-01', 'MiniMax-Text-01', 'minimax', 2 UNION ALL
-  SELECT 'deepseek-chat', 'DeepSeek Chat', 'deepseek', 1 UNION ALL
-  SELECT 'deepseek-reasoner', 'DeepSeek Reasoner', 'deepseek', 2 UNION ALL
-  SELECT 'qwen-plus', 'Qwen Plus', 'qwen', 1 UNION ALL
-  SELECT 'qwen-max', 'Qwen Max', 'qwen', 2 UNION ALL
-  SELECT 'glm-4-plus', 'GLM-4-Plus', 'zhipu', 1 UNION ALL
-  SELECT 'gpt-4o-mini', 'GPT-4o mini', 'openai', 1 UNION ALL
-  SELECT 'qwen2.5:7b', 'Qwen2.5 7B', 'ollama', 1
-) t WHERE NOT EXISTS (SELECT 1 FROM sys_dict d WHERE d.dict_type='model_id' AND d.dict_key=t.k AND IFNULL(d.parent_key,'')=t.p);
+-- 模型ID字典（parent_key 为厂商）
+INSERT OR IGNORE INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled) VALUES
+  ('model_id', 'MiniMax-M3', 'MiniMax-M3', 'minimax', 1, 1),
+  ('model_id', 'MiniMax-Text-01', 'MiniMax-Text-01', 'minimax', 2, 1),
+  ('model_id', 'deepseek-chat', 'DeepSeek Chat', 'deepseek', 1, 1),
+  ('model_id', 'deepseek-reasoner', 'DeepSeek Reasoner', 'deepseek', 2, 1),
+  ('model_id', 'qwen-plus', 'Qwen Plus', 'qwen', 1, 1),
+  ('model_id', 'qwen-max', 'Qwen Max', 'qwen', 2, 1),
+  ('model_id', 'glm-4-plus', 'GLM-4-Plus', 'zhipu', 1, 1),
+  ('model_id', 'gpt-4o-mini', 'GPT-4o mini', 'openai', 1, 1),
+  ('model_id', 'qwen2.5:7b', 'Qwen2.5 7B', 'ollama', 1, 1);
 
--- 测试模型：MiniMax-M3（幂等）
-INSERT INTO ai_model (name, provider, base_url, api_key, model_id, temperature, max_tokens, enabled)
-SELECT 'MiniMax-M3（测试）', 'minimax', 'https://api.minimaxi.com/v1', 'q6fiYkYPQ/aK8XByPk4db7u5RXnz5CdPJuA+tU1cTTyaSCC/rspZlJJuEU+PR7c/a8osFEVRZtcvuiaQmklIT3sbnV1RoeE9B47DQDJ/YPK6FAM/wXyn7rZiPV//7JSUygsmPz+fQW6ec74w4et0CEeeSOziTbNJzdApiJoROZrcvc/MNpVxiDj3OWopQBfZzJRC03u80pC2', 'MiniMax-M3', 0.7, 4096, 1
-WHERE NOT EXISTS (SELECT 1 FROM ai_model WHERE model_id = 'MiniMax-M3');
+-- 测试模型：MiniMax-M3
+INSERT OR IGNORE INTO ai_model (name, provider, base_url, api_key, model_id, temperature, max_tokens, enabled)
+VALUES ('MiniMax-M3（测试）', 'minimax', 'https://api.minimaxi.com/v1', 'q6fiYkYPQ/aK8XByPk4db7u5RXnz5CdPJuA+tU1cTTyaSCC/rspZlJJuEU+PR7c/a8osFEVRZtcvuiaQmklIT3sbnV1RoeE9B47DQDJ/YPK6FAM/wXyn7rZiPV//7JSUygsmPz+fQW6ec74w4et0CEeeSOziTbNJzdApiJoROZrcvc/MNpVxiDj3OWopQBfZzJRC03u80pC2', 'MiniMax-M3', 0.7, 4096, 1);

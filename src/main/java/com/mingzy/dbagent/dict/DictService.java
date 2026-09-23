@@ -20,6 +20,11 @@ public class DictService {
     }
 
     public DictItem save(Long id, DictItem item) {
+        boolean duplicate = dao.find(item.dictType(), null, null).stream()
+                .anyMatch(d -> d.dictKey().equals(item.dictKey())
+                        && java.util.Objects.equals(d.parentKey(), item.parentKey())
+                        && (id == null || !d.id().equals(id)));
+        if (duplicate) throw new IllegalArgumentException("字典项已存在: " + item.dictKey());
         if (id == null) {
             return dao.findById(dao.insert(item));
         }

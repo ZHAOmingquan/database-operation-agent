@@ -50,6 +50,11 @@ public class AiModelDao {
         return l.isEmpty() ? null : l.get(0);
     }
 
+    public AiModel findByName(String name) {
+        List<AiModel> l = jdbc.query("SELECT * FROM ai_model WHERE name=?", MAPPER, name);
+        return l.isEmpty() ? null : l.get(0);
+    }
+
     public List<AiModel> findAll() { return jdbc.query("SELECT * FROM ai_model ORDER BY id", MAPPER); }
 
     public void disableAll() { jdbc.update("UPDATE ai_model SET enabled=0 WHERE enabled=1"); }

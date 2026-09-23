@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DictServiceTest {
 
@@ -40,5 +41,13 @@ class DictServiceTest {
         service.save(item.id(), new DictItem(item.id(), "model_id", "MiniMax-M3", "MiniMax M3（新）", "minimax", 5, false));
         assertThat(service.modelIds("minimax")).isEmpty();  // disabled 被过滤
         assertThat(service.list("model_id", "minimax", null)).hasSize(1); // 管理列表仍可见
+    }
+
+    @Test
+    void duplicateRejected() {
+        assertThatThrownBy(() -> service.save(null,
+                new DictItem(null, "model_id", "MiniMax-M3", "MiniMax M3 重复", "minimax", 9, true)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("已存在");
     }
 }
