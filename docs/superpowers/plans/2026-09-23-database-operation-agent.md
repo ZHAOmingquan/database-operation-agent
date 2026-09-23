@@ -4276,6 +4276,446 @@ git add -A && git commit -m "feat: websocket infrastructure"
 
 ---
 
+### Task 22A: 系统配置管理（sys_config + 开发者模式）
+
+**Files:**
+- Modify: `src/main/resources/sql/schema.sql`（末尾追加 sys_config 表）
+- Modify: `src/main/resources/sql/update.sql`（追加 developer_mode 种子）
+- Create: `src/main/java/com/mingzy/dbagent/sysconfig/{SysConfig,SysConfigDao,SysConfigService}.java`
+- Create: `src/main/java/com/mingzy/dbagent/sysconfig/web/ConfigController.java`
+- Modify: `frontend/src/App.vue`（菜单）、`frontend/src/router/index.js`（路由）、`frontend/src/api/index.js`（configApi）
+- Create: `frontend/src/views/ConfigView.vue`
+- Test: `src/test/java/com/mingzy/dbagent/sysconfig/SysConfigServiceTest.java`
+
+- [ ] **Step 1: schema.sql 追加表；update.sql 追加种子**
+
+```sql
+CREATE TABLE IF NOT EXISTS sys_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_key TEXT NOT NULL UNIQUE,
+    config_value TEXT NOT NULL,
+    description TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+```
+```sql
+-- 系统配置（开发者模式：开启后才允许执行删除操作 DELETE/DROP/TRUNCATE）
+INSERT OR IGNORE INTO sys_config (config_key, config_value, description) VALUES
+  ('developer_mode', 'false', '开发者模式：开启后才允许数据库执行删除操作（DELETE/DROP/TRUNCATE）');
+```
+
+- [ ] **Step 2: 写测试（TDD 红）**
+
+`src/test/java/com/mingzy/dbagent/sysconfig/SysConfigServiceTest.java`:
+```java
+package com.mingzy.dbagent.sysconfig;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class SysConfigServiceTest {
+
+    private SysConfigService service;
+
+    @BeforeEach
+    void setUp() {
+        JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:", true));
+        jdbc.execute("""
+            CREATE TABLE sys_config (id INTEGER PRIMARY KEY AUTOINCREMENT, config_key TEXT NOT NULL UNIQUE,
+              config_value TEXT NOT NULL, description TEXT, updated_at TEXT)
+            """);
+        service = new SysConfigService(new SysConfigDao(jdbc));
+        jdbc.update("INSERT INTO sys_config(config_key, config_value, description) VALUES('developer_mode','false','开发者模式')");
+    }
+
+    @Test
+    void getBoolReadsAndDefaults() {
+        assertThat(service.getBool("developer_mode", true)).isFalse();
+        assertThat(service.getBool("missing_key", true)).isTrue();
+    }
+
+    @Test
+    void setUpdatesValue() {
+        service.set("developer_mode", "true");
+        assertThat(service.getBool("developer_mode", false)).isTrue();
+        assertThat(service.list()).hasSize(1);
+    }
+
+    @Test
+    void setValidatesKeyAndValue() {
+        assertThatThrownBy(() -> service.set("missing_key", "true"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("不存在");
+        assertThatThrownBy(() -> service.set("developer_mode", "not-bool"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("true 或 false");
+    }
+}
+```
+
+- [ ] **Step 3: 运行确认失败 → 实现 record/DAO/Service/Controller → 运行通过**
+
+```java
+package com.mingzy.dbagent.sysconfig;
+
+public record SysConfig(Long id, String configKey, String configValue, String description, String updatedAt) {
+}
+```
+```java
+package com.mingzy.dbagent.sysconfig;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+
+@Repository
+public class SysConfigDao {
+
+    private final JdbcTemplate jdbc;
+    public SysConfigDao(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    private static final RowMapper<SysConfig> MAPPER = (rs, i) -> new SysConfig(
+            rs.getLong("id"), rs.getString("config_key"), rs.getString("config_value"),
+            rs.getString("description"), rs.getString("updated_at"));
+
+    public List<SysConfig> findAll() {
+        return jdbc.query("SELECT * FROM sys_config ORDER BY id", MAPPER);
+    }
+
+    public SysConfig findByKey(String key) {
+        List<SysConfig> l = jdbc.query("SELECT * FROM sys_config WHERE config_key=?", MAPPER, key);
+        return l.isEmpty() ? null : l.get(0);
+    }
+
+    public void updateValue(String key, String value) {
+        jdbc.update("UPDATE sys_config SET config_value=?, updated_at=datetime('now','localtime') WHERE config_key=?", value, key);
+    }
+}
+```
+```java
+package com.mingzy.dbagent.sysconfig;
+
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@Service
+public class SysConfigService {
+
+    public static final String DEVELOPER_MODE = "developer_mode";
+
+    private final SysConfigDao dao;
+
+    public SysConfigService(SysConfigDao dao) { this.dao = dao; }
+
+    public List<SysConfig> list() { return dao.findAll(); }
+
+    public String get(String key, String defaultValue) {
+        SysConfig c = dao.findByKey(key);
+        return c == null ? defaultValue : c.configValue();
+    }
+
+    public boolean getBool(String key, boolean defaultValue) {
+        return Boolean.parseBoolean(get(key, String.valueOf(defaultValue)));
+    }
+
+    /** 更新配置值（仅允许已存在的配置键；当前全部为 true/false 布尔开关） */
+    public SysConfig set(String key, String value) {
+        SysConfig c = dao.findByKey(key);
+        if (c == null) throw new IllegalArgumentException("配置不存在: " + key);
+        String v = value == null ? "" : value.trim().toLowerCase();
+        if (!"true".equals(v) && !"false".equals(v)) {
+            throw new IllegalArgumentException("配置值必须为 true 或 false");
+        }
+        dao.updateValue(key, v);
+        return dao.findByKey(key);
+    }
+}
+```
+```java
+package com.mingzy.dbagent.sysconfig.web;
+
+import com.mingzy.dbagent.common.Result;
+import com.mingzy.dbagent.sysconfig.SysConfig;
+import com.mingzy.dbagent.sysconfig.SysConfigService;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/configs")
+public class ConfigController {
+
+    private final SysConfigService service;
+    public ConfigController(SysConfigService service) { this.service = service; }
+
+    @GetMapping
+    public Result<List<SysConfig>> list() { return Result.ok(service.list()); }
+
+    @PutMapping("/{key}")
+    public Result<SysConfig> update(@PathVariable String key, @RequestBody Map<String, String> body) {
+        return Result.ok(service.set(key, body.get("value")));
+    }
+}
+```
+
+- [ ] **Step 4: 前端 ConfigView + 菜单/路由/api**
+
+`frontend/src/api/index.js` 追加：
+```js
+export const configApi = {
+  list: () => http.get('/configs'),
+  update: (key, value) => http.put(`/configs/${key}`, { value })
+}
+```
+`frontend/src/views/ConfigView.vue`：
+```vue
+<template>
+  <div style="padding: 16px; height: 100%; overflow: auto">
+    <a-card title="系统配置" :bordered="false">
+      <a-spin :spinning="loading">
+        <div v-for="c in configs" :key="c.configKey" class="config-item">
+          <div class="config-row">
+            <a-switch :checked="c.configValue === 'true'" @change="(v) => onToggle(c, v)" />
+            <span class="config-title">{{ titleOf(c.configKey) }}</span>
+            <a-tag v-if="c.configKey === 'developer_mode' && c.configValue === 'true'" color="red">已开启</a-tag>
+          </div>
+          <div class="config-desc">{{ c.description }}</div>
+        </div>
+      </a-spin>
+    </a-card>
+  </div>
+</template>
+
+<script setup>
+import { onMounted, ref } from 'vue'
+import { message, Modal } from 'ant-design-vue'
+import { configApi } from '../api'
+
+const configs = ref([])
+const loading = ref(false)
+const titleOf = (key) => ({ developer_mode: '开发者模式' }[key] || key)
+
+const load = async () => {
+  loading.value = true
+  try { configs.value = await configApi.list() } finally { loading.value = false }
+}
+
+const doSave = async (c, value) => {
+  await configApi.update(c.configKey, String(value))
+  message.success('已保存')
+  await load()
+}
+
+const onToggle = (c, value) => {
+  if (c.configKey === 'developer_mode' && value) {
+    Modal.confirm({
+      title: '开启开发者模式？',
+      content: '开启后将允许数据库执行删除操作（DELETE/DROP/TRUNCATE）。请确保你已了解删除的后果。',
+      okText: '确认开启',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => doSave(c, value)
+    })
+  } else {
+    doSave(c, value)
+  }
+}
+
+onMounted(load)
+</script>
+
+<style scoped>
+.config-item { padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+.config-row { display: flex; align-items: center; gap: 12px; }
+.config-title { font-weight: 600; }
+.config-desc { color: #888; margin-top: 6px; font-size: 13px; }
+</style>
+```
+`frontend/src/App.vue` 菜单追加（字典管理之后）：`<a-menu-item key="/configs">系统配置</a-menu-item>`
+`frontend/src/router/index.js` 追加：`{ path: '/configs', component: () => import('../views/ConfigView.vue') }`
+
+- [ ] **Step 5: 验证 + Commit**
+
+Run: `JAVA_HOME=/opt/apps/org.openjdk-lts/files/openjdk-lts ./mvnw test -Dtest=SysConfigServiceTest -Pskip-frontend`
+Expected: PASS（3 tests）；启动 18080 验证 `GET /api/configs` 返回 developer_mode=false，`PUT /api/configs/developer_mode` 改 true 后 GET 确认，再改回 false
+
+```bash
+git add -A && git commit -m "feat: system config module with developer mode switch"
+```
+
+---
+
+### Task 22B: 开发者模式删除拦截（DELETE/DROP/TRUNCATE）
+
+**Files:**
+- Modify: `src/main/java/com/mingzy/dbagent/executor/SqlClassifier.java`（新增 isDeleteLike）
+- Create: `src/main/java/com/mingzy/dbagent/executor/DeleteGuard.java`
+- Modify: `src/main/java/com/mingzy/dbagent/tool/DatabaseTools.java`（SessionHook 增加默认方法 onDenied；executeUpdate 前置检查）
+- Modify: `src/test/java/com/mingzy/dbagent/executor/SqlClassifierTest.java`
+- Create: `src/test/java/com/mingzy/dbagent/executor/DeleteGuardTest.java`
+- Modify: `src/test/java/com/mingzy/dbagent/tool/DatabaseToolsTest.java`
+
+- [ ] **Step 1: SqlClassifier 新增 isDeleteLike + 测试**
+
+```java
+private static final Set<String> DELETE_KEYWORDS = Set.of("delete", "drop", "truncate");
+
+/** 是否为删除类操作（DELETE / DROP / TRUNCATE）——受开发者模式守卫 */
+public static boolean isDeleteLike(String sql) {
+    String cleaned = stripComments(sql).trim();
+    if (cleaned.isEmpty()) return false;
+    return DELETE_KEYWORDS.contains(firstWord(cleaned));
+}
+```
+测试追加到 `SqlClassifierTest`：
+```java
+@Test
+void deleteLikeDetection() {
+    assertThat(SqlClassifier.isDeleteLike("delete from t")).isTrue();
+    assertThat(SqlClassifier.isDeleteLike("DELETE FROM t WHERE id=1")).isTrue();
+    assertThat(SqlClassifier.isDeleteLike("drop table t")).isTrue();
+    assertThat(SqlClassifier.isDeleteLike("truncate table t")).isTrue();
+    assertThat(SqlClassifier.isDeleteLike("-- 注释\ndelete from t")).isTrue();
+    assertThat(SqlClassifier.isDeleteLike("/* c */ DROP TABLE t")).isTrue();
+    assertThat(SqlClassifier.isDeleteLike("insert into t values(1)")).isFalse();
+    assertThat(SqlClassifier.isDeleteLike("update t set a=1")).isFalse();
+    assertThat(SqlClassifier.isDeleteLike("select * from t")).isFalse();
+}
+```
+
+- [ ] **Step 2: DeleteGuard + 测试**
+
+```java
+package com.mingzy.dbagent.executor;
+
+import com.mingzy.dbagent.sysconfig.SysConfigService;
+import org.springframework.stereotype.Component;
+
+@Component
+public class DeleteGuard {
+
+    public static final String DENY_MESSAGE = "请开启开发者模式，确保你对删除后果了解";
+
+    private final SysConfigService configService;
+
+    public DeleteGuard(SysConfigService configService) { this.configService = configService; }
+
+    /** 返回 null 表示允许执行；否则返回拒绝原因（提示用户开启开发者模式） */
+    public String checkAllowed(String sql) {
+        if (!SqlClassifier.isDeleteLike(sql)) return null;
+        return configService.getBool(SysConfigService.DEVELOPER_MODE, false) ? null : DENY_MESSAGE;
+    }
+}
+```
+`src/test/java/com/mingzy/dbagent/executor/DeleteGuardTest.java`:
+```java
+package com.mingzy.dbagent.executor;
+
+import com.mingzy.dbagent.sysconfig.SysConfigDao;
+import com.mingzy.dbagent.sysconfig.SysConfigService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class DeleteGuardTest {
+
+    private JdbcTemplate jdbc;
+    private DeleteGuard guard;
+
+    @BeforeEach
+    void setUp() {
+        jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:", true));
+        jdbc.execute("""
+            CREATE TABLE sys_config (id INTEGER PRIMARY KEY AUTOINCREMENT, config_key TEXT NOT NULL UNIQUE,
+              config_value TEXT NOT NULL, description TEXT, updated_at TEXT)
+            """);
+        jdbc.update("INSERT INTO sys_config(config_key, config_value) VALUES('developer_mode','false')");
+        guard = new DeleteGuard(new SysConfigService(new SysConfigDao(jdbc)));
+    }
+
+    @Test
+    void deleteLikeBlockedWhenDeveloperModeOff() {
+        assertThat(guard.checkAllowed("delete from users")).contains("请开启开发者模式");
+        assertThat(guard.checkAllowed("DROP TABLE users")).contains("请开启开发者模式");
+        assertThat(guard.checkAllowed("truncate table users")).contains("请开启开发者模式");
+    }
+
+    @Test
+    void nonDeleteOperationsAllowed() {
+        assertThat(guard.checkAllowed("insert into users(id) values(1)")).isNull();
+        assertThat(guard.checkAllowed("update users set name='a'")).isNull();
+        assertThat(guard.checkAllowed("create table t(a int)")).isNull();
+        assertThat(guard.checkAllowed("select * from users")).isNull();
+    }
+
+    @Test
+    void deleteAllowedWhenDeveloperModeOn() {
+        jdbc.update("UPDATE sys_config SET config_value='true' WHERE config_key='developer_mode'");
+        assertThat(guard.checkAllowed("delete from users")).isNull();
+    }
+}
+```
+
+- [ ] **Step 3: DatabaseTools 集成**
+
+SessionHook 新增默认方法（不破坏既有实现）：
+```java
+/** 删除类操作被开发者模式守卫拦截时的通知（仅内部会话触发；MCP 无会话不触发） */
+default void onDenied(long sessionId, String sql, String reason) {}
+```
+DatabaseTools 构造器新增 `DeleteGuard deleteGuard` 参数（存储字段）；`executeUpdate` 在只读检查之后、confirmWrite 之前插入：
+```java
+String denied = deleteGuard.checkAllowed(sql);
+if (denied != null) {
+    if (sessionId != null && sessionHook != null) {
+        sessionHook.onDenied(sessionId, sql, denied);
+    }
+    return "操作被拒绝：" + denied;
+}
+```
+`DatabaseToolsTest` 更新：setUp 中建 sys_config 内存表并构造 DeleteGuard，构造器参数调整；新增两个用例：
+```java
+@Test
+void deleteBlockedWithoutDeveloperMode() {
+    service.create(new com.mingzy.dbagent.datasource.dto.DatasourceRequest(
+            "demo", "mysql", "127.0.0.1", 3306, "mytest", "root", "pwd", null, false));
+    String out = tools.executeUpdate("demo", "delete from users where id=1", null);
+    assertThat(out).contains("请开启开发者模式");
+}
+
+@Test
+void insertNotAffectedByDeveloperMode() {
+    service.create(new com.mingzy.dbagent.datasource.dto.DatasourceRequest(
+            "demo2", "mysql", "127.0.0.1", 1, "mytest", "root", "pwd", null, false));
+    String out = tools.executeUpdate("demo2", "insert into users(id) values(1)", null);
+    assertThat(out).doesNotContain("开发者模式");
+}
+```
+（注：demo2 指向 127.0.0.1:1 不可达端口，连接被立即拒绝，仅验证“非删除操作不被守卫拦截”而不触碰真实库。）
+
+- [ ] **Step 4: 运行测试 + Commit**
+
+Run: `JAVA_HOME=/opt/apps/org.openjdk-lts/files/openjdk-lts ./mvnw test -Dtest='SqlClassifierTest,DeleteGuardTest,DatabaseToolsTest' -Pskip-frontend`
+Expected: PASS
+
+```bash
+git add -A && git commit -m "feat: developer-mode guard blocks delete operations"
+```
+
+（说明：WS 推送 `delete_denied` 事件的 ChatService 实现属 Task 22；SQL 控制台执行接口在 Task 23 接入同一 DeleteGuard；前端弹框在 Task 24 实现。）
+
+---
+
 ### Task 22: ChatService 完整编排（LLM 循环 + 结果落库推送 + ai_comment 回填）
 
 **Files:**

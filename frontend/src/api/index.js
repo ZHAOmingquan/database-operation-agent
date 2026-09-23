@@ -61,4 +61,9 @@ export const confirmApi = {
   reject: (id) => http.post(`/confirm/${id}/reject`)
 }
 
+export const configApi = {
+  list: () => http.get('/configs'),
+  update: (key, value) => http.put(`/configs/${key}`, { value })
+}
+
 export default http

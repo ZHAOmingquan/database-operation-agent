@@ -71,17 +71,18 @@ com.mingzy.dbagent
 ├── datasource/   数据源实体/DAO、连接测试、DynamicDataSourceManager（HikariCP 池 Map，增删改即时刷新）
 ├── model/        大模型实体/DAO、启用切换、ChatClientFactory（按 DB 配置动态构建 OpenAI 兼容客户端）
 ├── dict/         字典实体/DAO、按 dict_type 与 parent_key 查询（厂商→模型ID 两级）
+├── sysconfig/    系统配置实体/DAO/服务（sys_config 表，含开发者模式开关）
 ├── metadata/     元数据服务接口 + MySQL/PostgreSQL 两个方言实现（表、视图、列、主键、注释）
 ├── executor/     SqlExecutor：语句分类（query/update/ddl）、SELECT 自动注入 LIMIT、超时、结果行截断
 ├── tool/         共享工具：list_datasources / list_tables / get_table_schema / execute_query / execute_update
 ├── mcp/          MCP Server 工具注册（自动发现 tool 包）
 ├── chat/         会话/消息服务、ChatService（编排 LLM 对话循环）、写操作确认（CompletableFuture）、WS Handler
-└── web/          REST Controllers（datasource/model/dict/session/confirm/console）
+└── web/          REST Controllers（datasource/model/dict/sysconfig/session/confirm/console）
 ```
 
-## 5. 数据模型（SQLite，7 张表）
+## 5. 数据模型（SQLite，8 张表）
 
-所有表由 `schema.sql` 以 `CREATE TABLE IF NOT EXISTS` 创建，种子数据由 `update.sql` 以 `INSERT ... WHERE NOT EXISTS`（或等价幂等写法）插入。
+所有表由 `schema.sql` 以 `CREATE TABLE IF NOT EXISTS` 创建（含必要唯一索引），种子数据由 `update.sql` 以 `INSERT OR IGNORE INTO ... VALUES` 幂等插入。
 
 1. `ds_datasource`：id、name(唯一)、db_type(mysql/postgresql)、host、port、database_name、username、password(AES-GCM 密文)、extra_params、read_only(0/1)、created_at、updated_at
 2. `ai_model`：id、name、provider(字典 key)、base_url、api_key(AES-GCM 密文)、model_id、temperature、max_tokens、enabled(0/1)、created_at、updated_at
@@ -90,6 +91,7 @@ com.mingzy.dbagent
 5. `chat_message`：id、session_id、role(user/assistant/tool)、content、tool_calls_json、status、created_at
 6. `sql_result`：id、session_id、message_id、datasource_id、sql_text、result_type(query/update/ddl/error)、columns_json、rows_json(最多截断存 500 行)、row_count、affected_rows、elapsed_ms、ai_comment(智能体解读)、source(agent/console)、status(success/error/pending)、error_message、created_at
 7. `confirm_request`：id、session_id、message_id、datasource_id、sql_text、status(pending/approved/rejected/expired)、created_at、expires_at
+8. `sys_config`：id、config_key(唯一)、config_value、description、updated_at（系统配置；`developer_mode` 控制删除操作）
 
 ## 6. 核心流程
 
@@ -118,6 +120,12 @@ com.mingzy.dbagent
 - `execute_update` 带 MCP 工具注解 `destructiveHint=true`，由 MCP 客户端负责向用户确认；服务端仍受只读数据源开关约束
 - 工具入参中的数据源以**数据源名称**（唯一）指定，对 LLM 更友好
 
+### 6.5 删除操作守卫（开发者模式）
+1. 系统配置 `developer_mode`（默认关闭）控制删除类操作：DELETE / DROP / TRUNCATE
+2. 关闭时：工具层在确认流程**之前**拦截（对内置对话与 MCP 同时生效），返回文本“请开启开发者模式，确保你对删除后果了解”；内部会话额外通过 WS 推送 `delete_denied` 事件，前端弹出提示框（提供前往“系统配置”入口）
+3. 开启时：删除操作仍走 6.2 的逐笔确认流程（双重保护）
+4. 只读数据源：无论如何写操作一律拒绝（见 6.2 第 5 条）
+
 ## 7. 共享工具清单（MCP 与内置 ChatClient 同一批）
 
 | 工具名 | 说明 | 入参 | 注解 |
@@ -138,8 +146,9 @@ REST（统一前缀 `/api`）：
 - 会话：`GET|POST /sessions`、`DELETE /sessions/{id}`、`GET /sessions/{id}/messages`、`GET /sessions/{id}/results`
 - 控制台：`POST /sessions/{id}/console/execute`
 - 确认：`POST /confirm/{id}/approve`、`POST /confirm/{id}/reject`
+- 系统配置：`GET /configs`、`PUT /configs/{key}`（值 true/false）
 
-WebSocket：`/ws/session/{sessionId}`，事件类型：`message`、`result`、`result_update`、`confirm_request`、`confirm_result`、`error`。
+WebSocket：`/ws/session/{sessionId}`，事件类型：`message`、`result`、`result_update`、`confirm_request`、`confirm_result`、`delete_denied`、`error`。
 
 MCP：`/mcp`（Streamable HTTP）。
 
@@ -165,6 +174,9 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 ### 9.4 字典管理 `/dict`
 按 dict_type 分 Tab（model_provider / model_id）；model_id 记录维护 parent_key（所属厂商）；支持增删改、启用/停用、排序。
 
+### 9.5 系统配置 `/configs`
+配置项列表（当前：开发者模式开关）。开发者模式为布尔开关：开启时二次确认弹窗（提示删除后果）；关闭时删除类操作（DELETE/DROP/TRUNCATE）被拦截，对话工作台/控制台弹出提示框“请开启开发者模式，确保你对删除后果了解”，并提供前往本页的入口。
+
 ## 10. 错误处理策略
 
 | 场景 | 处理 |
@@ -174,13 +186,15 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 | LLM 调用失败 | WS 推送 error 事件，前端显示错误气泡；不吞异常 |
 | SQL 执行超时 | 默认 30s（`Statement.setQueryTimeout`），可配置 |
 | 确认超时 | 60s 自动置 expired，回填 LLM "用户未在时限内确认" |
+| 删除操作被拦截（开发者模式关闭） | 工具返回拒绝文本（LLM 转述）；内部会话 WS 推送 `delete_denied`，前端弹出提示框并提供开启入口 |
 | WS 断线 | 前端指数退避重连 + 增量拉取补齐 |
 | MCP 调用错误 | 以 MCP 工具错误结果返回（异常信息文本化） |
 
 ## 11. 初始化数据与验收标准
 
 ### 11.1 幂等种子数据（update.sql）
-- 字典（dict_type=model_provider）：minimax、deepseek、qwen、zhipu、openai、ollama 六家厂商；字典（dict_type=model_id）按 parent_key 归组预置：MiniMax-M3；DeepSeek-Chat、DeepSeek-Reasoner；Qwen-Plus、Qwen-Max；GLM-4-Plus；gpt-4o-mini；qwen2.5:7b 等。全部厂商统一走 OpenAI 兼容适配器，差异仅在 baseUrl
+- 字典（dict_type=model_provider）：deepseek、qwen、glm、kimi、minimax 五家厂商；字典（dict_type=model_id）按 parent_key 各预置 2 个：deepseek-v4-flash/pro、qwen3.8-max/flash、glm-5.3/flash、k3/kimi-for-coding、MiniMax-M3/M2.7。全部厂商统一走 OpenAI 兼容适配器，差异仅在 baseUrl
+- 系统配置（sys_config）：`developer_mode=false`（开发者模式默认关闭；开启后才允许执行 DELETE/DROP/TRUNCATE）
 - 测试模型：MiniMax-M3（provider=minimax，baseUrl=`https://api.minimaxi.com/v1`，apiKey 使用 `docs/测试用大模型配置.md` 中的测试密钥，modelId=MiniMax-M3，enabled=1）；README 标注密钥仅供测试
 - 测试数据源：`mysql-mytest`（jdbc:mysql://192.168.110.88:3306/mytest，root）、`pg-mytest`（jdbc:postgresql://192.168.110.88:5432/mytest，ming），密码以 AES-GCM 密文写入
 - 数据库密码与 apiKey 的 AES 密钥来自 `application.yml`（给出默认值，README 提示生产更换）
@@ -225,5 +239,6 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 - [ ] 模型管理：配置/启用模型；厂商→模型ID 字典联动下拉
 - [ ] 工具能力对内（ChatClient）与对外（`/mcp`）均可用
 - [ ] 会话：WS 交互、写操作确认卡片、SQL 控制台、结果集列表、历史持久化
+- [ ] 系统配置：开发者模式开关；关闭时删除类操作（DELETE/DROP/TRUNCATE）被拦截并弹提示框，开启后删除仍逐笔确认
 - [ ] 验收用例 1、2 通过
 - [ ] README 初始化完成（架构、快速开始、配置、MCP 接入说明、测试密钥警示）

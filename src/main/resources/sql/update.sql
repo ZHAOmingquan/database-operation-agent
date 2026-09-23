@@ -35,3 +35,7 @@ INSERT OR IGNORE INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sor
 -- 测试模型：MiniMax-M3
 INSERT OR IGNORE INTO ai_model (name, provider, base_url, api_key, model_id, temperature, max_tokens, enabled)
 VALUES ('MiniMax-M3（测试）', 'minimax', 'https://api.minimaxi.com/v1', 'q6fiYkYPQ/aK8XByPk4db7u5RXnz5CdPJuA+tU1cTTyaSCC/rspZlJJuEU+PR7c/a8osFEVRZtcvuiaQmklIT3sbnV1RoeE9B47DQDJ/YPK6FAM/wXyn7rZiPV//7JSUygsmPz+fQW6ec74w4et0CEeeSOziTbNJzdApiJoROZrcvc/MNpVxiDj3OWopQBfZzJRC03u80pC2', 'MiniMax-M3', 0.7, 4096, 1);
+
+-- 系统配置（开发者模式：开启后才允许执行删除操作 DELETE/DROP/TRUNCATE）
+INSERT OR IGNORE INTO sys_config (config_key, config_value, description) VALUES
+  ('developer_mode', 'false', '开发者模式：开启后才允许数据库执行删除操作（DELETE/DROP/TRUNCATE）');

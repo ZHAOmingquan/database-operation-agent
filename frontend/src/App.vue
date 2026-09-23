@@ -7,6 +7,7 @@
         <a-menu-item key="/datasources">数据源管理</a-menu-item>
         <a-menu-item key="/models">模型管理</a-menu-item>
         <a-menu-item key="/dict">字典管理</a-menu-item>
+        <a-menu-item key="/configs">系统配置</a-menu-item>
       </a-menu>
     </a-layout-sider>
     <a-layout>

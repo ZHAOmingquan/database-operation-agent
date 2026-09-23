@@ -94,3 +94,12 @@ CREATE TABLE IF NOT EXISTS confirm_request (
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     expires_at TEXT NOT NULL
 );
+
+-- 系统配置（config_key 唯一；update.sql 幂等种子依赖）
+CREATE TABLE IF NOT EXISTS sys_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_key TEXT NOT NULL UNIQUE,
+    config_value TEXT NOT NULL,
+    description TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
