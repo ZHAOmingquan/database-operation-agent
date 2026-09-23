@@ -5557,6 +5557,8 @@ const onConfirmResolved = () => { /* store 在 confirm_result 事件中自动清
 git add -A && git commit -m "feat: chat panel with message stream and confirmation card"
 ```
 
+**实测记录（2026-09-23）：** 组件尚未被页面引用，vite build 不编译未引用文件，改用 `@vue/compiler-sfc` 对 3 个 SFC 做编译级验证（parse + compileScript + compileTemplate）均 OK；chat.js/socket.js 通过 `node --check` 语法验证。
+
 ---
 
 ### Task 26A: 数据源表单组件抽取（工作台复用，无数据源闭环前置）
