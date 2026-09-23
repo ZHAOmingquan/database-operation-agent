@@ -18,8 +18,8 @@ const store = useChatStore()
 </script>
 
 <style scoped>
-.result-panel { display: flex; flex-direction: column; height: 100%; }
+.result-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .bar { display: flex; align-items: center; padding: 6px 10px; border-bottom: 1px solid #f0f0f0; }
 .title { font-weight: 600; flex: 1; }
-.list { flex: 1; overflow: auto; padding: 10px; }
+.list { flex: 1; overflow: auto; min-height: 0; padding: 10px; }
 </style>

@@ -7,7 +7,7 @@
     </div>
     <div class="input-bar">
       <a-textarea v-model:value="draft" placeholder="用自然语言描述你要对数据库做的事，例如：帮我查询用户列表？"
-                  :auto-size="{ minRows: 1, maxRows: 4 }" @press-enter="onEnter" />
+                  :rows="3" @press-enter="onEnter" />
       <a-button type="primary" :disabled="!draft.trim() || store.thinking" @click="submit">发送</a-button>
     </div>
   </div>
@@ -45,6 +45,6 @@ const onConfirmResolved = () => { /* store 在 confirm_result 事件中自动清
 <style scoped>
 .chat-panel { display: flex; flex-direction: column; height: 100%; }
 .messages { flex: 1; overflow: auto; padding: 12px; }
-.input-bar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #f0f0f0; }
+.input-bar { display: flex; align-items: flex-end; gap: 8px; padding: 10px; border-top: 1px solid #f0f0f0; }
 .thinking { color: #999; font-size: 12px; padding: 4px 0; }
 </style>

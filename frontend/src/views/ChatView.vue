@@ -87,7 +87,11 @@ const onDatasourceSaved = async (ds) => {
 .pane { height: 100%; }
 .session-pane { border-right: 1px solid #f0f0f0; }
 .console-pane { border-left: 1px solid #f0f0f0; display: flex; flex-direction: column; }
-.console-pane > :last-child { flex: 1; overflow: hidden; }
+/* a-layout-sider 的实际子元素是 .ant-layout-sider-children 包裹层，需让其为 flex 列容器，
+   ResultPanel 才能用 flex:1 拿到剩余高度，否则会以 height:100% 撑出可视区被裁剪 */
+.console-pane :deep(.ant-layout-sider-children) {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
 .chat-pane { display: flex; flex-direction: column; min-width: 0; }
 .chat-toolbar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;

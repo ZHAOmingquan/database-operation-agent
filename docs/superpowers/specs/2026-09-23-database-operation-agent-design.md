@@ -13,7 +13,7 @@
 1. 数据源管理（MySQL、PostgreSQL）：增删改查、连接测试、动态生效、只读开关
 2. 大模型管理：可配置/启用模型（名称、供应商、baseUrl、apiKey、模型ID、temperature、maxTokens）；模型ID 为字典管理，按厂商动态加载下拉
 3. 元数据管理 + SQL 执行（增删改查）封装为 MCP 工具，同时供内置 ChatClient function calling 使用
-4. 会话功能：WebSocket 交互式会话；右侧上方 SQL 控制台；右侧下方动态结果集列表
+4. 会话功能：WebSocket 交互式会话；右侧上方 SQL 控制台；右侧下方动态结果集列表；会话按浏览器指纹隔离（迭代需求 3，见 17）
 5. 前端 Ant Design Vue 3 SPA，构建产物打包进后端 `static/`
 6. README 初始化
 
@@ -87,7 +87,7 @@ com.mingzy.dbagent
 1. `ds_datasource`：id、name(唯一)、db_type(mysql/postgresql)、host、port、database_name、username、password(AES-GCM 密文)、extra_params、read_only(0/1)、created_at、updated_at
 2. `ai_model`：id、name、provider(字典 key)、base_url、api_key(AES-GCM 密文)、model_id、temperature、max_tokens、enabled(0/1)、created_at、updated_at
 3. `sys_dict`：id、dict_type(model_provider / model_id)、dict_key、dict_label、parent_key(模型ID 归属的厂商 key)、sort、enabled
-4. `chat_session`：id、title、datasource_id、model_id、created_at、updated_at
+4. `chat_session`：id、title、datasource_id、model_id、client_fingerprint（浏览器指纹，迭代需求 3，见 17）、created_at、updated_at
 5. `chat_message`：id、session_id、role(user/assistant/tool)、content、tool_calls_json、status、created_at
 6. `sql_result`：id、session_id、message_id、datasource_id、sql_text、result_type(query/update/ddl/error)、columns_json、rows_json(最多截断存 500 行)、row_count、affected_rows、elapsed_ms、ai_comment(智能体解读)、source(agent/console)、status(success/error/pending)、error_message、created_at
 7. `confirm_request`：id、session_id、message_id、datasource_id、sql_text、status(pending/approved/rejected/expired)、created_at、expires_at
@@ -145,12 +145,12 @@ REST（统一前缀 `/api`）：
 - 元数据：`GET /datasources/{id}/tables`、`GET /datasources/{id}/tables/{table}/schema`
 - 模型：`GET|POST /models`、`PUT|DELETE /models/{id}`、`POST /models/{id}/enable`、`POST /models/test`
 - 字典：`GET|POST /dicts`、`PUT|DELETE /dicts/{id}`、`GET /dicts/model_ids?provider=`（联动下拉）
-- 会话：`GET|POST /sessions`、`DELETE /sessions/{id}`、`GET /sessions/{id}/messages`、`GET /sessions/{id}/results`
+- 会话：`GET|POST /sessions`、`DELETE /sessions/{id}`、`GET /sessions/{id}/messages`、`GET /sessions/{id}/results`（会话相关接口需携带 `X-Browser-Fingerprint` 头，按指纹隔离；迭代需求 3，见 17）
 - 控制台：`POST /sessions/{id}/console/execute`
-- 确认：`POST /confirm/{id}/approve`、`POST /confirm/{id}/reject`
+- 确认：`POST /confirm/{id}/approve`、`POST /confirm/{id}/reject`（校验确认请求所属会话的指纹）
 - 系统配置：`GET /configs`、`PUT /configs/{key}`（值 true/false）
 
-WebSocket：`/ws/session/{sessionId}`，事件类型：`message`、`result`、`result_update`、`confirm_request`、`confirm_result`、`delete_denied`、`no_datasource`、`error`。
+WebSocket：`/ws/session/{sessionId}?fp=<浏览器指纹>`（迭代需求 3 起握手校验指纹），事件类型：`message`、`result`、`result_update`、`confirm_request`、`confirm_result`、`delete_denied`、`no_datasource`、`error`。
 
 MCP：`/mcp`（Streamable HTTP）。
 
@@ -220,6 +220,7 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
   - 字典与数据源 DAO（内存 SQLite）
   - `ChartConfigBuilder`：图表类型归一与 x/y 字段自动推导（迭代需求 2）
   - `SensitiveDataMasker`：JDBC URL / Access denied / PG 认证失败 / password= 等凭据形态脱敏（迭代需求 2）
+  - `ChatDao`：会话按浏览器指纹隔离（列表过滤 / 归属校验 / 迁移列存在性）（迭代需求 3）
 - 集成测试（可选，需 192.168.110.88 网络可达）：MySQL/PG 连接测试、元数据查询
 - 验收：第 11.2 节用例人工走查
 - 每个实施阶段结束运行 `mvn test` 并汇报真实输出
@@ -283,3 +284,38 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 
 ### 16.6 种子数据调整
 - 为配合 16.4，`update.sql` 移除「测试模型 MiniMax-M3」种子（含加密后的测试密钥密文）；全新环境首启仅预置两个测试数据源与字典 / 系统配置。测试模型请在「模型管理」页面自行新增。
+
+## 17. 迭代需求 3（浏览器指纹会话隔离，2026-09-23 交付，实施见计划 docs/superpowers/plans/2026-09-23-browser-fingerprint-isolation.md）
+
+用户追加需求的落地设计：通过浏览器指纹隔离用户会话，避免多个浏览器之间用户数据共享；加载历史会话列表同样按指纹过滤。该机制不是登录 / 鉴权体系，仅按浏览器维度隔离会话数据。
+
+### 17.1 指纹生成与传递（前端）
+- 新增 `frontend/src/utils/fingerprint.js`，在应用启动阶段初始化，供 axios 请求拦截器与 WebSocket 连接同步取用：
+  - 首次访问：`salt`（16 字节随机 hex，`crypto.getRandomValues`）+ 浏览器特征串（UA、语言、平台、屏幕宽高 / 色深、devicePixelRatio、时区偏移、CPU 核数）→ `SHA-256`（`crypto.subtle`；非安全上下文回退 FNV-1a 64 位）得到指纹，持久化到 `localStorage['dbagent_fp']`。
+  - 后续访问：优先读取缓存（浏览器版本升级、屏幕 / 缩放变化均不影响身份）。
+- 传递：axios 请求拦截器为全部 `/api` 请求附加 `X-Browser-Fingerprint` 头；WebSocket 连接为 `ws://.../ws/session/{id}?fp=<指纹>`。
+- 语义：同一浏览器（刷新 / 重启）指纹稳定；不同浏览器或不同无头浏览器实例因随机盐必然互异；清空站点数据视为新身份（旧会话仍保留在库中，可认领，见 17.3）。
+
+### 17.2 后端隔离
+- 数据契约：`chat_session` 新增 `client_fingerprint TEXT` 列（schema.sql 建表包含，并以 `ALTER TABLE … ADD COLUMN` 幂等迁移旧库；重复执行由 `continue-on-error` 容忍，沿用 16.3 先例），并建索引 `ix_chat_session_client_fingerprint`。
+- `ChatDao`：`insertSession(title, datasourceId, modelId, fingerprint)`；`listSessions(fingerprint)` 按指纹过滤；新增 `findOwnedSession(id, fingerprint)` 供归属校验。
+- 接口校验（`common/BrowserFingerprint` 统一提取，缺失即报“缺少浏览器指纹”）：
+  - `/api/sessions*` 全部接口必须携带 `X-Browser-Fingerprint`；按 id 的操作（update / delete / messages / results / console）先校验会话归属，不匹配统一返回“会话不存在或无访问权限”（不暴露会话存在性）。
+  - `/api/confirm/{id}/approve|reject` 校验确认请求所属会话的指纹。
+  - WS 握手：路径会话属主与 `?fp=` 缺失或不一致时以 Policy Violation 关闭连接。
+- 隔离范围：会话 / 消息 / 结果 / 确认 / SQL 控制台按指纹隔离；数据源、模型、字典、系统配置仍为全局配置（本地工具定位，不含用户数据）；MCP 不涉及会话，保持现状。
+
+### 17.3 旧数据迁移
+- 升级前创建的无指纹会话（`client_fingerprint IS NULL`）对所有浏览器不可见，数据保留在库中。
+- 认领方式：浏览器控制台执行 `localStorage.getItem('dbagent_fp')` 获取指纹，再对 SQLite 执行：
+
+```sql
+UPDATE chat_session SET client_fingerprint='<指纹>' WHERE client_fingerprint IS NULL;
+```
+
+### 17.4 验收标准
+1. 两个不同浏览器（含 agent-browser 两个独立实例）打开工作台：会话列表互不可见，新建 / 删除 / 提问互不影响
+2. 同一浏览器刷新 / 重启后历史会话仍在
+3. 携带 B 指纹直接访问 A 的会话（messages / results / console / confirm / WS 连接）→ 一律拒绝
+4. 旧会话（无指纹）对所有浏览器不可见；认领 SQL 执行后可在对应浏览器看到
+5. 单元测试（DAO 隔离、迁移列存在性）与 agent-browser 双实例端到端验证通过

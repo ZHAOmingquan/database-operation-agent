@@ -49,9 +49,16 @@ CREATE TABLE IF NOT EXISTS chat_session (
     title TEXT NOT NULL DEFAULT '新会话',
     datasource_id INTEGER,
     model_id INTEGER,
+    client_fingerprint TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+
+-- 迁移：chat_session 增加 client_fingerprint 列（旧库升级；新库已在建表语句中包含，报 duplicate column 由 continue-on-error 容忍）
+ALTER TABLE chat_session ADD COLUMN client_fingerprint TEXT;
+
+-- 指纹过滤索引（会话列表按指纹查询）
+CREATE INDEX IF NOT EXISTS ix_chat_session_client_fingerprint ON chat_session(client_fingerprint);
 
 CREATE TABLE IF NOT EXISTS chat_message (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

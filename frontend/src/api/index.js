@@ -1,7 +1,15 @@
 import axios from 'axios'
 import { message } from 'ant-design-vue'
+import { getFingerprint } from '../utils/fingerprint'
 
 const http = axios.create({ baseURL: '/api', timeout: 60000 })
+
+// 所有请求统一携带浏览器指纹（后端按指纹隔离会话数据）
+http.interceptors.request.use((cfg) => {
+  const fp = getFingerprint()
+  if (fp) cfg.headers['X-Browser-Fingerprint'] = fp
+  return cfg
+})
 
 http.interceptors.response.use(
   (resp) => {

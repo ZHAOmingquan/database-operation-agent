@@ -18,7 +18,7 @@ class ChatDaoTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:", true));
         jdbc.execute("""
             CREATE TABLE chat_session (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL DEFAULT '新会话',
-              datasource_id INTEGER, model_id INTEGER, created_at TEXT, updated_at TEXT)
+              datasource_id INTEGER, model_id INTEGER, client_fingerprint TEXT, created_at TEXT, updated_at TEXT)
             """);
         jdbc.execute("""
             CREATE TABLE chat_message (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL,
@@ -41,19 +41,19 @@ class ChatDaoTest {
 
     @Test
     void sessionCrud() {
-        long id = dao.insertSession("测试会话", 1L, 2L);
+        long id = dao.insertSession("测试会话", 1L, 2L, "fp-test");
         assertThat(dao.findSession(id).title()).isEqualTo("测试会话");
         dao.touchSession(id, "新标题", 3L);
         assertThat(dao.findSession(id).title()).isEqualTo("新标题");
         assertThat(dao.findSession(id).datasourceId()).isEqualTo(3L);
-        assertThat(dao.listSessions()).hasSize(1);
+        assertThat(dao.listSessions("fp-test")).hasSize(1);
         dao.deleteSession(id);
         assertThat(dao.findSession(id)).isNull();
     }
 
     @Test
     void messageAndResultFlow() {
-        long sid = dao.insertSession("s", null, null);
+        long sid = dao.insertSession("s", null, null, "fp-test");
         long mid = dao.insertMessage(sid, "user", "查用户列表", null);
         long aid = dao.insertMessage(sid, "assistant", null, null, "running");
         dao.updateMessage(aid, "共 10 个用户", "done", "[1]");
@@ -74,7 +74,7 @@ class ChatDaoTest {
 
     @Test
     void chartConfigRoundTrip() {
-        long sid = dao.insertSession("s", null, null);
+        long sid = dao.insertSession("s", null, null, "fp-test");
         String cfg = "{\"chartType\":\"bar\",\"title\":\"用户状态分布\",\"xField\":\"status\",\"yField\":\"cnt\"}";
         long rid = dao.insertResult(new SqlResult(null, sid, null, 1L, "mysql-mytest",
                 "select status, count(*) as cnt from users group by status", "query",
@@ -85,11 +85,29 @@ class ChatDaoTest {
 
     @Test
     void confirmRequestFlow() {
-        long sid = dao.insertSession("s", null, null);
+        long sid = dao.insertSession("s", null, null, "fp-test");
         long cid = dao.insertConfirm(new ConfirmRequest(null, sid, 9L, 1L, "mysql-mytest",
                 "delete from users where id=1", "pending", null, "2030-01-01 00:00:00"));
         assertThat(dao.findConfirm(cid).status()).isEqualTo("pending");
         dao.updateConfirmStatus(cid, "approved");
         assertThat(dao.findConfirm(cid).status()).isEqualTo("approved");
+    }
+
+    @Test
+    void sessionsAreIsolatedByFingerprint() {
+        long a = dao.insertSession("A 的会话", null, null, "fp-a");
+        long b = dao.insertSession("B 的会话", null, null, "fp-b");
+        assertThat(dao.listSessions("fp-a")).extracting(ChatSession::id).containsExactly(a);
+        assertThat(dao.listSessions("fp-b")).extracting(ChatSession::id).containsExactly(b);
+        assertThat(dao.findOwnedSession(a, "fp-a")).isNotNull();
+        assertThat(dao.findOwnedSession(a, "fp-b")).isNull();
+        assertThat(dao.findOwnedSession(b, "fp-b")).isNotNull();
+    }
+
+    @Test
+    void legacySessionsWithoutFingerprintAreInvisible() {
+        dao.insertSession("旧会话", null, null, null);
+        assertThat(dao.listSessions("fp-a")).isEmpty();
+        assertThat(dao.listSessions("fp-b")).isEmpty();
     }
 }

@@ -21,7 +21,7 @@ class ChatE2eIT {
 
     @Test
     void naturalLanguageQueryUsers() {
-        long sessionId = chatDao.insertSession("e2e", 1L, 1L); // 1=mysql-mytest
+        long sessionId = chatDao.insertSession("e2e", 1L, 1L, "fp-e2e-manual"); // 1=mysql-mytest
         chatService.handleUserMessage(sessionId, "帮我查询用户列表？", 1L, 1L);
         var messages = chatDao.listMessages(sessionId);
         assertThat(messages).isNotEmpty();

@@ -6,6 +6,7 @@ import com.mingzy.dbagent.chat.ChatMessage;
 import com.mingzy.dbagent.chat.ChatSession;
 import com.mingzy.dbagent.chat.SqlResult;
 import com.mingzy.dbagent.chat.WsSessionRegistry;
+import com.mingzy.dbagent.common.BrowserFingerprint;
 import com.mingzy.dbagent.common.Result;
 import com.mingzy.dbagent.datasource.DatasourceService;
 import com.mingzy.dbagent.executor.DeleteGuard;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -46,21 +48,28 @@ public class SessionController {
     }
 
     @GetMapping
-    public Result<List<ChatSession>> list() { return Result.ok(chatDao.listSessions()); }
+    public Result<List<ChatSession>> list(
+            @RequestHeader(value = BrowserFingerprint.HEADER, required = false) String clientFingerprint) {
+        return Result.ok(chatDao.listSessions(BrowserFingerprint.require(clientFingerprint)));
+    }
 
     @PostMapping
-    public Result<ChatSession> create(@RequestBody(required = false) Map<String, Object> body) {
+    public Result<ChatSession> create(
+            @RequestHeader(value = BrowserFingerprint.HEADER, required = false) String clientFingerprint,
+            @RequestBody(required = false) Map<String, Object> body) {
+        String fp = BrowserFingerprint.require(clientFingerprint);
         String title = body != null && body.get("title") != null ? body.get("title").toString() : "新会话";
         Long datasourceId = body != null && body.get("datasourceId") != null
                 ? Long.valueOf(body.get("datasourceId").toString()) : null;
-        long id = chatDao.insertSession(title, datasourceId, null);
+        long id = chatDao.insertSession(title, datasourceId, null, fp);
         return Result.ok(chatDao.findSession(id));
     }
 
     @PutMapping("/{id}")
-    public Result<ChatSession> update(@PathVariable long id, @RequestBody Map<String, Object> body) {
-        ChatSession s = chatDao.findSession(id);
-        if (s == null) throw new IllegalArgumentException("会话不存在: " + id);
+    public Result<ChatSession> update(@PathVariable long id,
+            @RequestHeader(value = BrowserFingerprint.HEADER, required = false) String clientFingerprint,
+            @RequestBody Map<String, Object> body) {
+        ChatSession s = requireOwned(id, clientFingerprint);
         String title = body.get("title") != null ? body.get("title").toString() : s.title();
         Long datasourceId = body.get("datasourceId") != null
                 ? Long.valueOf(body.get("datasourceId").toString()) : s.datasourceId();
@@ -69,17 +78,33 @@ public class SessionController {
     }
 
     @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable long id) { chatDao.deleteSession(id); return Result.ok(null); }
+    public Result<Void> delete(@PathVariable long id,
+            @RequestHeader(value = BrowserFingerprint.HEADER, required = false) String clientFingerprint) {
+        requireOwned(id, clientFingerprint);
+        chatDao.deleteSession(id);
+        return Result.ok(null);
+    }
 
     @GetMapping("/{id}/messages")
-    public Result<List<ChatMessage>> messages(@PathVariable long id) { return Result.ok(chatDao.listMessages(id)); }
+    public Result<List<ChatMessage>> messages(@PathVariable long id,
+            @RequestHeader(value = BrowserFingerprint.HEADER, required = false) String clientFingerprint) {
+        requireOwned(id, clientFingerprint);
+        return Result.ok(chatDao.listMessages(id));
+    }
 
     @GetMapping("/{id}/results")
-    public Result<List<SqlResult>> results(@PathVariable long id) { return Result.ok(chatDao.listResults(id)); }
+    public Result<List<SqlResult>> results(@PathVariable long id,
+            @RequestHeader(value = BrowserFingerprint.HEADER, required = false) String clientFingerprint) {
+        requireOwned(id, clientFingerprint);
+        return Result.ok(chatDao.listResults(id));
+    }
 
     /** SQL 控制台执行：用户手写 SQL，无需确认；删除类操作仍受开发者模式守卫；结果落库并 WS 推送（source=console） */
     @PostMapping("/{id}/console/execute")
-    public Result<SqlResult> consoleExecute(@PathVariable long id, @RequestBody Map<String, Object> body) throws Exception {
+    public Result<SqlResult> consoleExecute(@PathVariable long id,
+            @RequestHeader(value = BrowserFingerprint.HEADER, required = false) String clientFingerprint,
+            @RequestBody Map<String, Object> body) throws Exception {
+        requireOwned(id, clientFingerprint);
         String sql = body.get("sql").toString();
         long datasourceId = Long.parseLong(body.get("datasourceId").toString());
         Integer limit = body.get("limit") == null ? null : Integer.valueOf(body.get("limit").toString());
@@ -101,5 +126,12 @@ public class SessionController {
         SqlResult saved = chatDao.findResult(resultId);
         ws.send(id, "result", saved);
         return Result.ok(saved);
+    }
+
+    /** 归属校验：不匹配与不存在统一报错，避免暴露会话存在性 */
+    private ChatSession requireOwned(long id, String clientFingerprint) {
+        ChatSession s = chatDao.findOwnedSession(id, BrowserFingerprint.require(clientFingerprint));
+        if (s == null) throw new IllegalArgumentException("会话不存在或无访问权限: " + id);
+        return s;
     }
 }

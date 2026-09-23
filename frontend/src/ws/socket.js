@@ -1,3 +1,5 @@
+import { getFingerprint } from '../utils/fingerprint'
+
 let ws = null
 let sessionId = null
 let handlers = {}
@@ -15,7 +17,9 @@ export function connect(id, onEvent) {
 
 function open() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  ws = new WebSocket(`${proto}://${location.host}/ws/session/${sessionId}`)
+  // 浏览器无法为 WS 设置自定义头，指纹以查询参数传递（握手校验见后端 ChatWebSocketHandler）
+  const fp = getFingerprint()
+  ws = new WebSocket(`${proto}://${location.host}/ws/session/${sessionId}${fp ? `?fp=${encodeURIComponent(fp)}` : ''}`)
   ws.onopen = () => {
     retryDelay = 1000
     handlers.onStatus?.('connected')

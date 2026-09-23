@@ -25,4 +25,11 @@ class SchemaInitTest {
         assertThat(tables).contains("ds_datasource", "ai_model", "sys_dict", "sys_config",
             "chat_session", "chat_message", "sql_result", "confirm_request");
     }
+
+    @Test
+    void chatSessionHasClientFingerprintColumn() {
+        List<String> columns = jdbcTemplate.queryForList(
+            "SELECT name FROM pragma_table_info('chat_session')", String.class);
+        assertThat(columns).contains("client_fingerprint");
+    }
 }

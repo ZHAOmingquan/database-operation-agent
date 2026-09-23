@@ -47,15 +47,16 @@ public class ChatDao {
     private long key(KeyHolder kh) { return kh.getKey().longValue(); }
 
     // ==== chat_session ====
-    public long insertSession(String title, Long datasourceId, Long modelId) {
+    public long insertSession(String title, Long datasourceId, Long modelId, String clientFingerprint) {
         KeyHolder kh = new GeneratedKeyHolder();
         jdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                "INSERT INTO chat_session(title, datasource_id, model_id) VALUES(?,?,?)",
+                "INSERT INTO chat_session(title, datasource_id, model_id, client_fingerprint) VALUES(?,?,?,?)",
                 Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, title);
             if (datasourceId == null) ps.setNull(2, java.sql.Types.INTEGER); else ps.setLong(2, datasourceId);
             if (modelId == null) ps.setNull(3, java.sql.Types.INTEGER); else ps.setLong(3, modelId);
+            if (clientFingerprint == null) ps.setNull(4, java.sql.Types.VARCHAR); else ps.setString(4, clientFingerprint);
             return ps;
         }, kh);
         return key(kh);
@@ -66,8 +67,16 @@ public class ChatDao {
         return l.isEmpty() ? null : l.get(0);
     }
 
-    public List<ChatSession> listSessions() {
-        return jdbc.query("SELECT * FROM chat_session ORDER BY id DESC", SESSION_MAPPER);
+    /** 归属校验：仅当会话属于该指纹时返回，否则 null（旧的无指纹会话对任何指纹都不可见） */
+    public ChatSession findOwnedSession(long id, String clientFingerprint) {
+        List<ChatSession> l = jdbc.query("SELECT * FROM chat_session WHERE id=? AND client_fingerprint=?",
+                SESSION_MAPPER, id, clientFingerprint);
+        return l.isEmpty() ? null : l.get(0);
+    }
+
+    public List<ChatSession> listSessions(String clientFingerprint) {
+        return jdbc.query("SELECT * FROM chat_session WHERE client_fingerprint=? ORDER BY id DESC",
+                SESSION_MAPPER, clientFingerprint);
     }
 
     public void touchSession(long id, String title, Long datasourceId) {

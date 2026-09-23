@@ -54,9 +54,8 @@ public class ConfirmationService {
         }
     }
 
-    public void approve(long confirmId) {
-        ConfirmRequest c = chatDao.findConfirm(confirmId);
-        if (c == null) throw new IllegalArgumentException("确认请求不存在: " + confirmId);
+    public void approve(long confirmId, String clientFingerprint) {
+        ConfirmRequest c = requireOwnedConfirm(confirmId, clientFingerprint);
         if (!"pending".equals(c.status())) return;
         chatDao.updateConfirmStatus(confirmId, "approved");
         ws.send(c.sessionId(), "confirm_result", Map.of("id", confirmId, "status", "approved"));
@@ -64,13 +63,21 @@ public class ConfirmationService {
         if (f != null) f.complete(Decision.APPROVED);
     }
 
-    public void reject(long confirmId) {
-        ConfirmRequest c = chatDao.findConfirm(confirmId);
-        if (c == null) throw new IllegalArgumentException("确认请求不存在: " + confirmId);
+    public void reject(long confirmId, String clientFingerprint) {
+        ConfirmRequest c = requireOwnedConfirm(confirmId, clientFingerprint);
         if (!"pending".equals(c.status())) return;
         chatDao.updateConfirmStatus(confirmId, "rejected");
         ws.send(c.sessionId(), "confirm_result", Map.of("id", confirmId, "status", "rejected"));
         CompletableFuture<Decision> f = pending.get(confirmId);
         if (f != null) f.complete(Decision.REJECTED);
+    }
+
+    /** 确认请求必须存在且所属会话属于当前浏览器指纹，否则视为不存在（不暴露存在性） */
+    private ConfirmRequest requireOwnedConfirm(long confirmId, String clientFingerprint) {
+        ConfirmRequest c = chatDao.findConfirm(confirmId);
+        if (c == null) throw new IllegalArgumentException("确认请求不存在: " + confirmId);
+        if (chatDao.findOwnedSession(c.sessionId(), clientFingerprint) == null)
+            throw new IllegalArgumentException("会话不存在或无访问权限: " + c.sessionId());
+        return c;
     }
 }

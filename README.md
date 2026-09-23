@@ -1,4 +1,4 @@
-# 数据库操作智能体（Database Operation Agent）
+# 数据库操作分析智能体（Database Operation Agent）
 
 通过自然语言对话直接对数据库进行查询与增删改查的智能体。基于 Spring Boot + Spring AI 构建：内置工具层同时服务于内部对话（Function Calling）与外部 MCP 客户端（Streamable HTTP），配套 Vue3 对话工作台。
 
@@ -15,6 +15,7 @@
 - **图表展示（ECharts）**：统计分析 / 趋势 / 占比类提问由智能体自动调用 `render_chart` 生成聚合 SQL，以柱状 / 折线 / 饼图展示并标注「AI 图表」；任意结果卡片可手动切换「表格 / 图表」
 - **MCP Server**：`/mcp`（Streamable HTTP）暴露 6 个工具，供 Claude Desktop / Cursor 等外部客户端调用
 - **历史持久化**：会话 / 消息 / 执行结果全部落 SQLite，刷新页面自动恢复
+- **浏览器指纹会话隔离**：会话按浏览器指纹（特征 + 本地随机盐）隔离，多个浏览器互不可见；历史会话列表同样按指纹过滤（详见「浏览器指纹会话隔离」） --此部分可自行替换为账号密码登录，通过账号隔离
 - **凭据隔离**：数据库账号 / 密码 / 主机不进入大模型上下文与 MCP 响应；工具异常消息统一脱敏后再回传（详见「凭据安全」）
 - **日志落盘**：同时输出控制台与滚动文件 `logs/database-operation-agent.log`（gz 归档）
 
@@ -91,6 +92,21 @@ java -jar target/database-operation-agent-1.0.0.jar
 - 提问涉及统计分析 / 趋势 / 占比 / 分组对比时，智能体自动调用 `render_chart` 工具生成聚合 SQL，结果卡片以柱状 / 折线 / 饼图展示并标注「AI 图表」。
 - 任意结果卡片可在右上角手动切换「表格 / 图表」视图与图表类型。
 
+## 浏览器指纹会话隔离
+
+多个浏览器之间的会话数据互不可见：同一浏览器（刷新 / 重启）持有稳定指纹，不同浏览器 / 无头浏览器实例的指纹互不相同。会话列表、消息、结果、SQL 控制台与写操作确认均按指纹隔离；数据源、模型、字典、系统配置为全局配置，不参与隔离。
+
+- **指纹生成**：首次访问时由「浏览器特征（UA / 语言 / 屏幕 / 时区 / CPU 核数等）+ 16 字节随机盐」派生 SHA-256 指纹，缓存于 `localStorage['dbagent_fp']`；后续访问直接复用，浏览器升级或屏幕变化不影响身份。
+- **指纹传递**：REST 请求统一携带 `X-Browser-Fingerprint` 头；WebSocket 连接为 `/ws/session/{id}?fp=<指纹>`。
+- **越权防护**：携带其他浏览器的指纹访问某会话（messages / results / 控制台 / 确认 / WS 连接）一律拒绝，返回「会话不存在或无访问权限」。
+- **升级兼容**：升级前创建的无指纹旧会话不再展示（数据保留在库中）；如需认领，先在浏览器控制台执行 `localStorage.getItem('dbagent_fp')` 取指纹，再对 SQLite 执行：
+
+  ```sql
+  UPDATE chat_session SET client_fingerprint='<指纹>' WHERE client_fingerprint IS NULL;
+  ```
+
+- **验证**：用两个不同浏览器打开 http://localhost:8080/chat，各建一个会话 —— 列表互不可见；同一浏览器刷新后历史仍在。
+
 ## 日志
 
 应用同时输出到控制台与滚动文件：`logs/database-operation-agent.log`（相对启动目录，可用环境变量 `LOG_DIR` 覆盖）。按天 + 单文件 50MB 滚动，历史 gz 压缩，保留 30 天、总量上限 1GB；业务包默认 DEBUG。
@@ -134,6 +150,7 @@ curl -s -X POST http://localhost:8080/mcp -H 'Content-Type: application/json' \
 4. 会话中发起写操作（如 `把 users 表里 id 为 N 的记录 status 设为 1`）→ 弹出确认卡片 → 分别验证「取消」与「确认执行」
 5. 控制台执行 `delete from users where id = -1` → 默认弹框「删除操作被拒绝」，可一键前往系统配置开启开发者模式
 6. 输入 `各状态用户的数量分布` → 智能体自动出图：结果卡片标注「AI 图表」并以柱状图展示，可切换饼图 / 折线图与表格视图
+7. 用两个不同浏览器打开工作台：各自会话列表互不可见；同一浏览器刷新 / 重启后历史会话仍在（浏览器指纹隔离）
 
 ## 凭据安全（大模型隔离）
 
@@ -171,8 +188,8 @@ JAVA_HOME=/path/to/jdk-21 ./mvnw test -Dtest=ChatE2eIT -Pskip-frontend \
 │   ├── metadata/     库表元数据探查（表 / 视图 / 字段）
 │   ├── executor/     SQL 分类 / 执行 / 删除守卫（DeleteGuard）
 │   ├── tool/         工具层（对话 Function Calling 与 MCP 共用）
-│   ├── chat/         会话域（WS 编排 / 确认 / 历史 / REST）
-│   └── common/       统一返回 / 全局异常 / AES-GCM 加解密 / 敏感信息脱敏
+│   ├── chat/         会话域（WS 编排 / 确认 / 历史 / 指纹隔离 / REST）
+│   └── common/       统一返回 / 全局异常 / AES-GCM 加解密 / 敏感信息脱敏 / 浏览器指纹
 ├── src/main/resources/
 │   ├── application.yml
 │   ├── logback-spring.xml   日志（控制台 + 滚动文件 logs/）
