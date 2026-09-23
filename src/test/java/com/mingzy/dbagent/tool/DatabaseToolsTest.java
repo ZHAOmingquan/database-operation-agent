@@ -4,6 +4,7 @@ import com.mingzy.dbagent.datasource.DatasourceDao;
 import com.mingzy.dbagent.datasource.DatasourceService;
 import com.mingzy.dbagent.datasource.DynamicDataSourceManager;
 import com.mingzy.dbagent.executor.DeleteGuard;
+import com.mingzy.dbagent.executor.SqlExecResult;
 import com.mingzy.dbagent.executor.SqlExecutor;
 import com.mingzy.dbagent.metadata.MetadataServiceRouter;
 import com.mingzy.dbagent.metadata.MysqlMetadataService;
@@ -74,5 +75,38 @@ class DatabaseToolsTest {
                 "demo2", "mysql", "127.0.0.1", 1, "mytest", "root", "pwd", null, false));
         String out = tools.executeUpdate("demo2", "insert into users(id) values(1)", null);
         assertThat(out).doesNotContain("开发者模式");
+    }
+
+    @Test
+    void autoChartMarksAggregateQuery() {
+        SqlExecResult r = SqlExecResult.ok("query",
+                java.util.List.of("category", "cnt"),
+                java.util.List.of(java.util.List.of("电子产品", 3), java.util.List.of("图书文具", 2)),
+                null, 5, false);
+        String json = DatabaseTools.autoChartJson("select category, count(*) cnt from products group by category", r);
+        assertThat(json).contains("\"auto\":true").contains("category").contains("cnt");
+    }
+
+    @Test
+    void autoChartHandlesScalarAggregate() {
+        SqlExecResult r = SqlExecResult.ok("query",
+                java.util.List.of("count(*)"), java.util.List.of(java.util.List.of(42)), null, 5, false);
+        String json = DatabaseTools.autoChartJson("select count(*) from products", r);
+        assertThat(json).contains("\"auto\":true").contains("count(*)");
+    }
+
+    @Test
+    void autoChartSkipsPlainTableQuery() {
+        SqlExecResult r = SqlExecResult.ok("query",
+                java.util.List.of("id", "name"), java.util.List.of(java.util.List.of(1, "a")), null, 5, false);
+        assertThat(DatabaseTools.autoChartJson("select id, name from products", r)).isNull();
+    }
+
+    @Test
+    void autoChartSkipsFailedOrNonQuery() {
+        assertThat(DatabaseTools.autoChartJson("select count(*) from t",
+                SqlExecResult.error("query", 1, "boom"))).isNull();
+        assertThat(DatabaseTools.autoChartJson("select count(*) from t",
+                SqlExecResult.ok("update", java.util.List.of(), java.util.List.of(), 1, 5, false))).isNull();
     }
 }

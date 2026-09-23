@@ -1,5 +1,9 @@
 # Database Operation Agent
 
+> **You no longer need developers or a separate system to analyze your data** — just chat in natural language and know your database data inside out; **your data, account credentials never leave your domain at any point** — not a single byte of database data is ever sent to the LLM!!!
+>
+> The agent only operates on the designated database(s); for any instruction or question other than database DDL / DML, it clearly tells you that this type of operation is not supported.
+
 An AI agent that operates databases through natural-language conversation. Built with Spring Boot + Spring AI: a shared tool layer serves both the built-in chat (Function Calling) and external MCP clients (Streamable HTTP), paired with a Vue3 workbench.
 
 ## Features
@@ -12,7 +16,7 @@ An AI agent that operates databases through natural-language conversation. Built
 - **Developer-mode delete guard**: DELETE / DROP / TRUNCATE are blocked by default; the UI guides you to enable the switch
 - **No-datasource closure**: when no datasource exists, asking a question pops up a "new datasource" form; saving it auto-resends your question
 - **SQL console**: run ad-hoc SQL directly (no confirmation), results join the result panel
-- **Charts (ECharts)**: statistics / trend / share questions trigger the `render_chart` tool (aggregate SQL → bar / line / pie, tagged "AI 图表"); any result card can be switched between table and chart
+- **Charts (ECharts)**: results of statistical SQL (aggregate functions / GROUP BY) are auto-tagged by the backend, so result cards render a chart by default (tagged "统计图表", switchable bar / line / pie); the agent can also call `render_chart` explicitly to choose the chart type (tagged "AI 图表"); multi-column plain queries default to the table view, and any result card can be switched between table and chart
 - **MCP server**: `/mcp` (Streamable HTTP) exposes 6 tools for Claude Desktop / Cursor etc.
 - **Persistence**: sessions, messages and results are stored in SQLite and restored on refresh
 - **Credential isolation**: DB accounts / passwords / hosts never reach the LLM; tool error messages are masked before returning

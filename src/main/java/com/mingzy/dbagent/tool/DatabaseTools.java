@@ -4,6 +4,7 @@ import com.mingzy.dbagent.common.SensitiveDataMasker;
 import com.mingzy.dbagent.datasource.Datasource;
 import com.mingzy.dbagent.datasource.DatasourceService;
 import com.mingzy.dbagent.executor.DeleteGuard;
+import com.mingzy.dbagent.executor.SqlClassifier;
 import com.mingzy.dbagent.executor.SqlExecResult;
 import com.mingzy.dbagent.executor.SqlExecutor;
 import com.mingzy.dbagent.metadata.MetadataServiceRouter;
@@ -131,7 +132,7 @@ public class DatabaseTools implements ToolCallbackProvider {
         }
     }
 
-    @Tool(name = "execute_query", description = "在指定数据源上执行只读查询（SELECT 等）。系统默认最多返回 10 行；未指定 limit 时按默认值截断。返回结果以表格文本形式给出。")
+    @Tool(name = "execute_query", description = "在指定数据源上执行只读查询（SELECT 等）。系统默认最多返回 10 行；未指定 limit 时按默认值截断。返回结果以表格文本形式给出；聚合统计查询（count/sum/avg/group by 等）的结果会同时在右侧结果区默认以图表展示。")
     public String executeQuery(@ToolParam(description = "数据源名称") String datasourceName,
                                @ToolParam(description = "SQL 查询语句") String sql,
                                @ToolParam(description = "返回行数上限（可选，默认10）", required = false) Integer limit,
@@ -142,7 +143,7 @@ public class DatabaseTools implements ToolCallbackProvider {
             SqlExecResult result = executor.executeQuery(ref.pool(), sql, effLimit, maxResultRows, queryTimeout);
             Long sessionId = sessionIdOf(toolContext);
             if (sessionId != null && sessionHook != null) {
-                sessionHook.onQuery(sessionId, ref.datasource().id(), datasourceName, sql, result, traceIdOf(toolContext) == null ? null : String.valueOf(traceIdOf(toolContext)), null);
+                sessionHook.onQuery(sessionId, ref.datasource().id(), datasourceName, sql, result, traceIdOf(toolContext) == null ? null : String.valueOf(traceIdOf(toolContext)), autoChartJson(sql, result));
             }
             return renderResult(sql, result);
         } catch (Exception e) {
@@ -211,6 +212,29 @@ public class DatabaseTools implements ToolCallbackProvider {
                     + "，X轴：" + cfg.get("xField") + "，Y轴：" + cfg.get("yField") + "）：\n" + renderResult(sql, result);
         } catch (Exception e) {
             return "生成图表失败: " + SensitiveDataMasker.scrub(e.getMessage());
+        }
+    }
+
+    /** 统计查询自动标记：聚合/GROUP BY 查询的结果自动生成图表配置（带 auto 标记，前端默认渲染图表）；无法成图或非统计查询返回 null（前端回退表格） */
+    static String autoChartJson(String sql, SqlExecResult result) {
+        try {
+            if (!result.success() || !"query".equals(result.resultType()) || !SqlClassifier.isAggregateQuery(sql)) return null;
+            Map<String, Object> cfg;
+            try {
+                cfg = ChartConfigBuilder.build("bar", null, null, null, result.columns(), result.rows());
+            } catch (IllegalArgumentException e) {
+                // 单列标量聚合（如 SELECT COUNT(*)）：以第一列同时作为类目与数值
+                if (result.columns().size() != 1 || result.rows().isEmpty()) return null;
+                cfg = new java.util.LinkedHashMap<>();
+                cfg.put("chartType", "bar");
+                cfg.put("title", "统计图表");
+                cfg.put("xField", result.columns().get(0));
+                cfg.put("yField", result.columns().get(0));
+            }
+            cfg.put("auto", true);
+            return MAPPER.writeValueAsString(cfg);
+        } catch (Exception e) {
+            return null;
         }
     }
 

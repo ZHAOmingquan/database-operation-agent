@@ -49,4 +49,28 @@ class SqlClassifierTest {
         assertThat(SqlClassifier.isDeleteLike("update t set a=1")).isFalse();
         assertThat(SqlClassifier.isDeleteLike("select * from t")).isFalse();
     }
+
+    @Test
+    void aggregateQueryDetection() {
+        assertThat(SqlClassifier.isAggregateQuery("select count(*) from t")).isTrue();
+        assertThat(SqlClassifier.isAggregateQuery("SELECT SUM(amount) FROM orders")).isTrue();
+        assertThat(SqlClassifier.isAggregateQuery("select category, count(*) c from products group by category")).isTrue();
+        assertThat(SqlClassifier.isAggregateQuery("select avg(price) as avg_price from products")).isTrue();
+        assertThat(SqlClassifier.isAggregateQuery("with a as (select max(id) m from t) select * from a")).isTrue();
+        assertThat(SqlClassifier.isAggregateQuery("-- 注释\nselect count(*) from t")).isTrue();
+        assertThat(SqlClassifier.isAggregateQuery("select /* count(1) */ name from t")).isFalse(); // 注释剥离后无聚合
+        assertThat(SqlClassifier.isAggregateQuery(null)).isFalse();
+    }
+
+    @Test
+    void aggregateQueryFalsePositives() {
+        assertThat(SqlClassifier.isAggregateQuery("select * from t")).isFalse();
+        assertThat(SqlClassifier.isAggregateQuery("select id, name, price from products where stock > 10")).isFalse();
+        // 字符串字面量与引用标识符中的聚合字样不算
+        assertThat(SqlClassifier.isAggregateQuery("select * from t where note = 'count(*)'")).isFalse();
+        assertThat(SqlClassifier.isAggregateQuery("select * from `sum_table` where col = 'group by'")).isFalse();
+        assertThat(SqlClassifier.isAggregateQuery("select * from t where name = \"max(price)\"")).isFalse();
+        // 含 GROUP BY 但藏在字符串里
+        assertThat(SqlClassifier.isAggregateQuery("select * from t where desc = 'a group by b'")).isFalse();
+    }
 }

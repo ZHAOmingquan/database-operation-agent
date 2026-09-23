@@ -19,7 +19,7 @@
         </a-radio-group>
         <a-select v-if="viewMode === 'chart'" v-model:value="chartType" size="small"
                   style="width: 92px" :options="chartTypeOptions" />
-        <a-tag v-if="chartConfig" color="purple">AI 图表</a-tag>
+        <a-tag v-if="chartConfig" :color="chartConfig.auto ? 'blue' : 'purple'">{{ chartConfig.auto ? '统计图表' : 'AI 图表' }}</a-tag>
       </div>
       <a-table v-if="viewMode === 'table'" :columns="columns" :data-source="rows" size="small" :pagination="false"
                :scroll="{ x: 'max-content', y: 160 }" row-key="__rowKey" />
@@ -60,7 +60,7 @@ const rows = computed(() => rawRows.value.map((row, i) => {
   return obj
 }))
 
-// AI 通过 render_chart 产出图表配置时默认展示图表；否则默认表格、可手动切换
+// 有图表配置（AI render_chart 产出或后端对统计语句的自动标记）时默认展示图表；否则默认表格、可手动切换
 const chartConfig = computed(() => safeParse(props.item.chartConfig, null))
 const viewMode = ref(props.item.chartConfig ? 'chart' : 'table')
 const chartType = ref(chartConfig.value?.chartType || 'bar')

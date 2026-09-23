@@ -14,6 +14,10 @@ public final class SqlClassifier {
 
     private static final Pattern LINE_COMMENT = Pattern.compile("--[^\n]*|#[^\n]*");
     private static final Pattern BLOCK_COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
+    private static final Pattern STRING_LITERAL = Pattern.compile("'(?:''|[^'])*'");
+    private static final Pattern QUOTED_IDENTIFIER = Pattern.compile("`[^`]*`|\"[^\"]*\"");
+    private static final Pattern AGGREGATE_FN = Pattern.compile("\\b(count|sum|avg|min|max)\\s*\\(", Pattern.CASE_INSENSITIVE);
+    private static final Pattern GROUP_BY = Pattern.compile("\\bgroup\\s+by\\b", Pattern.CASE_INSENSITIVE);
 
     private SqlClassifier() {
     }
@@ -32,6 +36,13 @@ public final class SqlClassifier {
         String cleaned = stripComments(sql).trim();
         if (cleaned.isEmpty()) return false;
         return DELETE_KEYWORDS.contains(firstWord(cleaned));
+    }
+
+    /** 是否为统计/聚合查询（含聚合函数或 GROUP BY）——命中时后端自动标记 chartConfig，前端默认渲染图表 */
+    public static boolean isAggregateQuery(String sql) {
+        if (sql == null) return false;
+        String cleaned = QUOTED_IDENTIFIER.matcher(STRING_LITERAL.matcher(stripComments(sql)).replaceAll(" ")).replaceAll(" ");
+        return AGGREGATE_FN.matcher(cleaned).find() || GROUP_BY.matcher(cleaned).find();
     }
 
     static String stripComments(String sql) {
