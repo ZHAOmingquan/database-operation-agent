@@ -1,0 +1,10 @@
+import { createRouter, createWebHistory } from 'vue-router'
+
+const routes = [
+  { path: '/', redirect: '/chat' },
+  { path: '/chat', component: () => import('../views/Placeholder.vue') },
+  { path: '/datasources', component: () => import('../views/Placeholder.vue') },
+  { path: '/models', component: () => import('../views/Placeholder.vue') },
+  { path: '/dict', component: () => import('../views/Placeholder.vue') }
+]
+export default createRouter({ history: createWebHistory(), routes })
