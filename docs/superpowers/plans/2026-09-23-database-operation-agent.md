@@ -5731,6 +5731,8 @@ onMounted(load)
 Run: `export PATH=/home/bright/dev/code/ai/database-operation-agent/target/node/node:$PATH && cd frontend && npm run build`
 Expected: 构建通过（确认数据源页与组件无编译错误）
 
+**实测记录（2026-09-23）：** `npm run build` 通过（✓ built in 1.06s，DatasourceView chunk 含新引用组件）；DatasourceFormModal 已被 DatasourceView 真实引用并参与编译。
+
 - [ ] **Step 4: Commit**
 
 ```bash
