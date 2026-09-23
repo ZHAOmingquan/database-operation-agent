@@ -1,0 +1,33 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: database-operation-agent
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+      schema-locations: classpath:sql/schema.sql
+      data-locations: classpath:sql/update.sql
+  ai:
+    mcp:
+      server:
+        name: database-operation-agent
+        version: 1.0.0
+        protocol: STREAMABLE
+app:
+  db:
+    path: ./data/agent.db
+  crypto:
+    key: ZGItYWdlbnQtZGV2LWtleS0zMmJ5dGVzLWxvbmchIQ==
+  sql:
+    default-limit: 10
+    max-result-rows: 500
+    query-timeout-seconds: 30
+  confirm:
+    timeout-seconds: 60
+  chat:
+    history-size: 20
+logging:
+  level:
+    com.mingzy.dbagent: DEBUG
