@@ -830,7 +830,7 @@ package com.mingzy.dbagent.datasource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import java.util.List;
 
@@ -843,7 +843,7 @@ class DatasourceDaoTest {
 
     @BeforeEach
     void setUp() {
-        DriverManagerDataSource ds = new DriverManagerDataSource("jdbc:sqlite::memory:");
+        SingleConnectionDataSource ds = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
         JdbcTemplate jdbc = new JdbcTemplate(ds);
         jdbc.execute("""
             CREATE TABLE ds_datasource (
@@ -1143,7 +1143,7 @@ import com.mingzy.dbagent.datasource.dto.DatasourceView;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -1154,7 +1154,7 @@ class DatasourceServiceTest {
 
     @BeforeEach
     void setUp() {
-        DriverManagerDataSource ds = new DriverManagerDataSource("jdbc:sqlite::memory:");
+        SingleConnectionDataSource ds = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
         JdbcTemplate jdbc = new JdbcTemplate(ds);
         jdbc.execute("""
             CREATE TABLE ds_datasource (
@@ -1771,7 +1771,7 @@ package com.mingzy.dbagent.dict;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -1781,7 +1781,7 @@ class DictServiceTest {
 
     @BeforeEach
     void setUp() {
-        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite::memory:"));
+        JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:", true));
         jdbc.execute("""
             CREATE TABLE sys_dict (id INTEGER PRIMARY KEY AUTOINCREMENT, dict_type TEXT NOT NULL,
               dict_key TEXT NOT NULL, dict_label TEXT NOT NULL, parent_key TEXT,
@@ -2137,7 +2137,7 @@ import com.mingzy.dbagent.common.AesGcmUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -2148,7 +2148,7 @@ class AiModelServiceTest {
 
     @BeforeEach
     void setUp() {
-        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite::memory:"));
+        JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:", true));
         jdbc.execute("""
             CREATE TABLE ai_model (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, provider TEXT NOT NULL,
               base_url TEXT NOT NULL, api_key TEXT NOT NULL, model_id TEXT NOT NULL,
@@ -3216,7 +3216,7 @@ package com.mingzy.dbagent.executor;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import javax.sql.DataSource;
 
@@ -3229,7 +3229,7 @@ class SqlExecutorTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        ds = new DriverManagerDataSource("jdbc:sqlite::memory:");
+        ds = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
         try (var conn = ds.getConnection(); var st = conn.createStatement()) {
             st.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
             for (int i = 1; i <= 25; i++) {
@@ -3416,7 +3416,7 @@ import com.mingzy.dbagent.metadata.PostgresMetadataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -3427,7 +3427,7 @@ class DatabaseToolsTest {
 
     @BeforeEach
     void setUp() {
-        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite::memory:"));
+        JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:", true));
         jdbc.execute("""
             CREATE TABLE ds_datasource (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
               db_type TEXT NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL, database_name TEXT NOT NULL,
@@ -3753,7 +3753,7 @@ package com.mingzy.dbagent.chat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import java.util.List;
 
@@ -3765,7 +3765,7 @@ class ChatDaoTest {
 
     @BeforeEach
     void setUp() {
-        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite::memory:"));
+        JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:", true));
         jdbc.execute("""
             CREATE TABLE chat_session (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL DEFAULT '新会话',
               datasource_id INTEGER, model_id INTEGER, created_at TEXT, updated_at TEXT)
