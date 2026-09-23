@@ -5003,6 +5003,11 @@ Expected: BUILD SUCCESS
 git add -A && git commit -m "feat: chat orchestration with tool loop and confirmation"
 ```
 
+**实测记录（验证通过）：** 编译 `./mvnw -q -Pskip-frontend -DskipTests compile` 成功；全量 `./mvnw test -Pskip-frontend` 46 tests 全绿（含 `@SpringBootTest` 全上下文加载，验证 ChatService `@PostConstruct` 装配 `SessionHook`、`DatabaseTools` 注入 `DeleteGuard`）。启动验证（端口 18080）：`Started DbagentApplication in 2.886 s`，Tomcat 监听 18080，MCP `Registered tools: 5`。要点：
+- `ChatClient.mutate().defaultSystem(...).defaultToolCallbacks(...)` 编译通过（Spring AI 1.1.8）。
+- SessionHook 匿名类额外实现 `onDenied`：推送 `delete_denied` 事件（payload: sql/reason），前端弹框属 Task 24。
+- 同步修正 `SchemaInitTest` 表断言（补入 `sys_config`，与设计“8 张表”一致）。
+
 ---
 
 ### Task 23: 会话 REST API（列表/消息/结果/控制台） + SPA 路由转发

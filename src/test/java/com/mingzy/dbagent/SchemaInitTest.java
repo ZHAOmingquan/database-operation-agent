@@ -22,7 +22,7 @@ class SchemaInitTest {
         List<String> tables = jdbcTemplate.queryForList(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
             String.class);
-        assertThat(tables).contains("ds_datasource", "ai_model", "sys_dict",
+        assertThat(tables).contains("ds_datasource", "ai_model", "sys_dict", "sys_config",
             "chat_session", "chat_message", "sql_result", "confirm_request");
     }
 }
