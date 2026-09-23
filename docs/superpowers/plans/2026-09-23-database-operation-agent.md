@@ -258,7 +258,7 @@ app:
   db:
     path: ./data/agent.db
   crypto:
-    key: ZGItYWdlbnQtZGV2LWtleS0zMmJ5dGVzLWxvbmchIQ==
+    key: VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU=
   sql:
     default-limit: 10
     max-result-rows: 500
@@ -647,7 +647,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class AesGcmUtilTest {
 
-    private static final String KEY = "ZGItYWdlbnQtZGV2LWtleS0zMmJ5dGVzLWxvbmchIQ==";
+    private static final String KEY = "VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU=";
 
     @Test
     void encryptDecryptRoundTrip() {
@@ -1165,7 +1165,7 @@ class DatasourceServiceTest {
               updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))
             """);
         dao = new DatasourceDao(jdbc);
-        service = new DatasourceService(dao, new AesGcmUtil("ZGItYWdlbnQtZGV2LWtleS0zMmJ5dGVzLWxvbmchIQ=="),
+        service = new DatasourceService(dao, new AesGcmUtil("VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU="),
                 new DynamicDataSourceManager());
     }
 
@@ -1706,7 +1706,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 public class GenCipher {
   public static void main(String[] a) throws Exception {
-    byte[] key = Base64.getDecoder().decode("ZGItYWdlbnQtZGV2LWtleS0zMmJ5dGVzLWxvbmchIQ==");
+    byte[] key = Base64.getDecoder().decode("VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU=");
     for (String plain : a) {
       byte[] iv = new byte[12]; new SecureRandom().nextBytes(iv);
       Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
@@ -2158,7 +2158,7 @@ class AiModelServiceTest {
               updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))
             """);
         dao = new AiModelDao(jdbc);
-        service = new AiModelService(dao, new AesGcmUtil("ZGItYWdlbnQtZGV2LWtleS0zMmJ5dGVzLWxvbmchIQ=="));
+        service = new AiModelService(dao, new AesGcmUtil("VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU="));
     }
 
     @Test
@@ -3435,7 +3435,7 @@ class DatabaseToolsTest {
               created_at TEXT, updated_at TEXT)
             """);
         DatasourceDao dao = new DatasourceDao(jdbc);
-        AesGcmUtil aes = new AesGcmUtil("ZGItYWdlbnQtZGV2LWtleS0zMmJ5dGVzLWxvbmchIQ==");
+        AesGcmUtil aes = new AesGcmUtil("VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU=");
         DatasourceService sp = new DatasourceService(dao, aes, new DynamicDataSourceManager());
         service = sp;
         // 用 sqlite 文件库充当"受管数据源"，验证工具链（路径用临时文件使多连接可见）

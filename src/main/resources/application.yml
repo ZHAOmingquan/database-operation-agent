@@ -19,7 +19,7 @@ app:
   db:
     path: ./data/agent.db
   crypto:
-    key: ZGItYWdlbnQtZGV2LWtleS0zMmJ5dGVzLWxvbmchIQ==
+    key: VrwqJyyH8fRw0LlA+RRoyAaMIWr2bwOCWJDqv8V2xaU=
   sql:
     default-limit: 10
     max-result-rows: 500
