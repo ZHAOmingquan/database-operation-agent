@@ -4927,8 +4927,17 @@ public class ChatService {
             AiModel model = modelId != null ? modelService.requireById(modelId) : modelService.enabled();
             if (model == null) { ws.send(sessionId, "error", Map.of("message", "请先在模型管理中启用一个模型")); return; }
             Datasource ds = datasourceId != null ? datasourceService.requireById(datasourceId) : null;
-            if (ds == null && session.datasourceId() != null) ds = datasourceService.requireById(session.datasourceId());
-            if (ds == null) { ws.send(sessionId, "error", Map.of("message", "请先选择数据源")); return; }
+            if (ds == null && session.datasourceId() != null) {
+                try { ds = datasourceService.requireById(session.datasourceId()); }
+                catch (IllegalArgumentException ignored) { /* 会话引用的数据源已被删除，按无可用数据源引导 */ }
+            }
+            if (ds == null) {
+                boolean hasAny = !datasourceService.rawList().isEmpty();
+                ws.send(sessionId, "no_datasource", Map.of(
+                        "message", hasAny ? "请先选择数据源" : "尚未配置数据源，请先新建数据源",
+                        "hasAnyDatasource", hasAny));
+                return;
+            }
 
             // 1) 落库用户消息 + 更新会话标题/数据源
             chatDao.insertMessage(sessionId, "user", content, null);
@@ -5007,6 +5016,8 @@ git add -A && git commit -m "feat: chat orchestration with tool loop and confirm
 - `ChatClient.mutate().defaultSystem(...).defaultToolCallbacks(...)` 编译通过（Spring AI 1.1.8）。
 - SessionHook 匿名类额外实现 `onDenied`：推送 `delete_denied` 事件（payload: sql/reason），前端弹框属 Task 24。
 - 同步修正 `SchemaInitTest` 表断言（补入 `sys_config`，与设计“8 张表”一致）。
+
+**补充实测记录（无数据源引导，验证通过）：** 临时库（`--app.db.path=./target/test-data/no-ds-verify.db`）启动 18080，清空 `ds_datasource` 后经 Node 内置 WebSocket 发送 `user_message`：收到 `{"type":"no_datasource","payload":{"hasAnyDatasource":false,"message":"尚未配置数据源，请先新建数据源"}}`；重新插入一条数据源后重试：收到 `{"type":"no_datasource","payload":{"hasAnyDatasource":true,"message":"请先选择数据源"}}`（两个分支均正确）。前端弹新建表单 + 创建后自动重发属 Task 26A/28。
 
 ---
 
@@ -5273,7 +5284,9 @@ export const useChatStore = defineStore('chat', {
     pendingConfirms: [],
     connected: false,
     thinking: false,
-    errors: []
+    errors: [],
+    lastPrompt: null,     // 最近一次提问，用于“无数据源”引导后自动重发
+    noDatasource: null    // 收到 no_datasource 事件时暂存 payload（{message, hasAnyDatasource}）
   }),
   actions: {
     async loadSessions() { this.sessions = await sessionApi.list() },
@@ -5298,7 +5311,16 @@ export const useChatStore = defineStore('chat', {
     },
     sendMessage(content, datasourceId, modelId) {
       this.thinking = true
+      this.lastPrompt = { content, modelId }
       socket.send({ type: 'user_message', content, datasourceId, modelId })
+    },
+    clearNoDatasource() { this.noDatasource = null },
+    resendLast(datasourceId) {
+      this.noDatasource = null
+      if (!this.lastPrompt) return
+      this.thinking = true
+      socket.send({ type: 'user_message', content: this.lastPrompt.content,
+        datasourceId, modelId: this.lastPrompt.modelId })
     },
     onEvent(evt) {
       const p = evt.payload || {}
@@ -5322,6 +5344,10 @@ export const useChatStore = defineStore('chat', {
         case 'confirm_result':
           this.pendingConfirms = this.pendingConfirms.filter((c) => c.id !== p.id)
           this.thinking = true
+          break
+        case 'no_datasource':
+          this.noDatasource = p
+          this.thinking = false
           break
         case 'error':
           this.errors.push(p.message)
@@ -5492,6 +5518,184 @@ const onConfirmResolved = () => { /* store 在 confirm_result 事件中自动清
 
 ```bash
 git add -A && git commit -m "feat: chat panel with message stream and confirmation card"
+```
+
+---
+
+### Task 26A: 数据源表单组件抽取（工作台复用，无数据源闭环前置）
+
+**Files:**
+- Create: `frontend/src/components/DatasourceFormModal.vue`
+- Modify: `frontend/src/views/DatasourceView.vue`（改用公共组件，删除页内重复表单）
+
+- [ ] **Step 1: 实现 DatasourceFormModal.vue**
+
+（从 DatasourceView.vue 抽取新建/编辑弹窗：props `open`（v-model:open）、`editing`（传数据源记录则为编辑模式，不传为新建）；emits `update:open`、`saved`（保存成功回传数据源记录））
+
+```vue
+<template>
+  <a-modal :open="open" :title="editing ? '编辑数据源' : '新建数据源'"
+           :confirm-loading="saving" @update:open="(v) => emit('update:open', v)" @ok="save">
+    <a-form layout="vertical" :model="form">
+      <a-form-item label="名称" required>
+        <a-input v-model:value="form.name" placeholder="唯一名称，如 local-mysql" />
+      </a-form-item>
+      <a-form-item label="类型" required>
+        <a-select v-model:value="form.dbType" :options="[{value:'mysql',label:'MySQL'},{value:'postgresql',label:'PostgreSQL'}]" @change="onTypeChange" />
+      </a-form-item>
+      <a-row :gutter="12">
+        <a-col :span="16"><a-form-item label="主机" required><a-input v-model:value="form.host" /></a-form-item></a-col>
+        <a-col :span="8"><a-form-item label="端口" required><a-input-number v-model:value="form.port" style="width:100%" /></a-form-item></a-col>
+      </a-row>
+      <a-form-item label="数据库名" required><a-input v-model:value="form.databaseName" /></a-form-item>
+      <a-form-item label="用户名" required><a-input v-model:value="form.username" /></a-form-item>
+      <a-form-item :label="editing ? '密码（留空则不修改）' : '密码'">
+        <a-input-password v-model:value="form.password" />
+      </a-form-item>
+      <a-form-item label="额外连接参数（可选）"><a-input v-model:value="form.extraParams" placeholder="k=v&k2=v2" /></a-form-item>
+      <a-form-item label="只读"><a-switch v-model:checked="form.readOnly" /></a-form-item>
+    </a-form>
+    <a-alert v-if="testMsg" :type="testOk ? 'success' : 'error'" :message="testMsg" show-icon style="margin-top:8px" />
+    <template #footer>
+      <a-button @click="testForm" :loading="testing">测试连接</a-button>
+      <a-button @click="emit('update:open', false)">取消</a-button>
+      <a-button type="primary" :loading="saving" @click="save">保存</a-button>
+    </template>
+  </a-modal>
+</template>
+
+<script setup>
+import { reactive, ref, watch } from 'vue'
+import { message } from 'ant-design-vue'
+import { datasourceApi } from '../api'
+
+const props = defineProps({
+  open: { type: Boolean, default: false },
+  editing: { type: Object, default: null } // 传入数据源记录则为编辑模式
+})
+const emit = defineEmits(['update:open', 'saved'])
+
+const saving = ref(false)
+const testing = ref(false)
+const testMsg = ref('')
+const testOk = ref(false)
+
+const emptyForm = () => ({ id: null, name: '', dbType: 'mysql', host: '127.0.0.1', port: 3306,
+  databaseName: '', username: 'root', password: '', extraParams: '', readOnly: false })
+const form = reactive(emptyForm())
+
+watch(() => props.open, (v) => {
+  if (!v) return
+  Object.assign(form, emptyForm(), props.editing || {}, props.editing ? { password: '' } : {})
+  testMsg.value = ''
+})
+
+const onTypeChange = (v) => { if (v === 'mysql') form.port = 3306; else form.port = 5432 }
+
+const save = async () => {
+  saving.value = true
+  try {
+    const payload = { ...form }
+    const saved = form.id ? await datasourceApi.update(form.id, payload) : await datasourceApi.create(payload)
+    message.success('已保存')
+    emit('update:open', false)
+    emit('saved', saved)
+  } finally { saving.value = false }
+}
+
+const testForm = async () => {
+  testing.value = true
+  try {
+    const r = await datasourceApi.test({ ...form }, form.id)
+    testOk.value = r.success
+    testMsg.value = r.success ? `连接成功（${r.elapsedMs}ms）` : `连接失败：${r.message}`
+  } finally { testing.value = false }
+}
+</script>
+```
+
+- [ ] **Step 2: DatasourceView 改用公共组件**
+
+改造后 `frontend/src/views/DatasourceView.vue`：
+```vue
+<template>
+  <div style="padding: 16px">
+    <a-space style="margin-bottom: 12px">
+      <a-button type="primary" @click="openCreate">新建数据源</a-button>
+      <a-button @click="load">刷新</a-button>
+    </a-space>
+    <a-table :data-source="rows" :columns="columns" row-key="id" size="middle" :loading="loading">
+      <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'readOnly'">
+          <a-tag :color="record.readOnly ? 'orange' : 'green'">{{ record.readOnly ? '只读' : '可写' }}</a-tag>
+        </template>
+        <template v-else-if="column.key === 'action'">
+          <a-space>
+            <a @click="testRow(record)">测试连接</a>
+            <a @click="openEdit(record)">编辑</a>
+            <a-popconfirm title="确认删除该数据源？" @confirm="removeRow(record.id)">
+              <a style="color: #ff4d4f">删除</a>
+            </a-popconfirm>
+          </a-space>
+        </template>
+      </template>
+    </a-table>
+
+    <DatasourceFormModal v-model:open="modalOpen" :editing="editing" @saved="load" />
+  </div>
+</template>
+
+<script setup>
+import { onMounted, ref } from 'vue'
+import { message } from 'ant-design-vue'
+import { datasourceApi } from '../api'
+import DatasourceFormModal from '../components/DatasourceFormModal.vue'
+
+const rows = ref([])
+const loading = ref(false)
+const modalOpen = ref(false)
+const editing = ref(null)
+
+const columns = [
+  { title: '名称', dataIndex: 'name' },
+  { title: '类型', dataIndex: 'dbType' },
+  { title: '主机:端口', customRender: ({ record }) => `${record.host}:${record.port}` },
+  { title: '库名', dataIndex: 'databaseName' },
+  { title: '用户', dataIndex: 'username' },
+  { title: '权限', key: 'readOnly' },
+  { title: '操作', key: 'action', width: 220 }
+]
+
+const load = async () => {
+  loading.value = true
+  try { rows.value = await datasourceApi.list() } finally { loading.value = false }
+}
+
+const openCreate = () => { editing.value = null; modalOpen.value = true }
+const openEdit = (r) => { editing.value = r; modalOpen.value = true }
+
+const testRow = async (r) => {
+  const res = await datasourceApi.test({ ...r, password: '' }, r.id)
+  if (res.success) message.success(`连接成功（${res.elapsedMs}ms）`)
+  else message.error(`连接失败：${res.message}`)
+}
+
+const removeRow = async (id) => { await datasourceApi.remove(id); message.success('已删除'); await load() }
+
+onMounted(load)
+</script>
+```
+（要点：页内 a-modal 表单、form/emptyForm/save/testForm/openCreate/openEdit 逻辑全部移除；行内 testRow/removeRow 保留；`@saved` 仅触发 load() 刷新列表。）
+
+- [ ] **Step 3: 构建验证**
+
+Run: `export PATH=/home/bright/dev/code/ai/database-operation-agent/target/node/node:$PATH && cd frontend && npm run build`
+Expected: 构建通过（确认数据源页与组件无编译错误）
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A && git commit -m "refactor: extract reusable datasource form modal for workbench"
 ```
 
 ---
@@ -5693,16 +5897,19 @@ git add -A && git commit -m "feat: sql console and result panel"
         <ResultPanel />
       </a-layout-content>
     </a-layout>
+    <DatasourceFormModal v-model:open="dsModalOpen" @saved="onDatasourceSaved" />
   </a-layout>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { message } from 'ant-design-vue'
 import { useChatStore } from '../stores/chat'
 import { datasourceApi, modelApi } from '../api'
 import ChatPanel from '../components/ChatPanel.vue'
 import SqlConsole from '../components/SqlConsole.vue'
 import ResultPanel from '../components/ResultPanel.vue'
+import DatasourceFormModal from '../components/DatasourceFormModal.vue'
 
 const store = useChatStore()
 const currentSessionId = ref(undefined)
@@ -5735,6 +5942,20 @@ const newSession = async () => {
   await store.switchSession(s.id)
 }
 const onDatasourceChange = () => {}
+
+// 无数据源闭环：后端推送 no_datasource 时弹出新建数据源表单（已有数据源但未选择则提示）
+const dsModalOpen = ref(false)
+watch(() => store.noDatasource, (v) => {
+  if (!v) return
+  if (v.hasAnyDatasource) { message.warning('请先在顶部选择数据源'); store.clearNoDatasource(); return }
+  dsModalOpen.value = true
+})
+
+const onDatasourceSaved = async (ds) => {
+  datasourceOptions.value.push({ value: ds.id, label: ds.name })
+  datasourceId.value = ds.id
+  await store.resendLast(ds.id)
+}
 </script>
 
 <style scoped>

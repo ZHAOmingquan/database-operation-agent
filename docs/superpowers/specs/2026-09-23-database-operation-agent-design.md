@@ -97,11 +97,12 @@ com.mingzy.dbagent
 
 ### 6.1 自然语言查询（WebSocket）
 1. 前端通过 `ws://.../ws/session/{sessionId}` 发送用户消息（含 sessionId、当前 datasourceId）
-2. ChatService 持久化消息 → 组装上下文（系统提示词：当前数据源、回答规范、默认 LIMIT 10 说明；最近 20 条历史消息）→ 调 ChatClient（携带共享工具）
-3. LLM 可能先调 `list_tables` / `get_table_schema`，再调 `execute_query`
-4. 执行器对 SELECT 自动注入 `LIMIT 10`（用户显式要求更多时按用户值），结果写入 `sql_result`（source=agent）并即时 WS 推送 `result` 事件
-5. 工具结果回填 LLM → 生成自然语言答案 → WS 推送 `message` 事件；若答案对应某次查询，则同时把答案写入该 `sql_result.ai_comment` 并推送 `result_update` 事件
-6. 前端：左侧消息流显示自然语言答案（工具调用过程可折叠展示），右下结果集列表新增/更新卡片
+2. 数据源前置校验（业务闭环）：会话未关联数据源且系统无任何数据源时，WS 推送 `no_datasource` 事件（hasAnyDatasource=false）并终止本轮；前端弹出新建数据源表单，创建成功后自动以新数据源重发原消息；系统已有数据源但未选择时同样推送 `no_datasource`（hasAnyDatasource=true），前端提示先在顶栏选择数据源
+3. ChatService 持久化消息 → 组装上下文（系统提示词：当前数据源、回答规范、默认 LIMIT 10 说明；最近 20 条历史消息）→ 调 ChatClient（携带共享工具）
+4. LLM 可能先调 `list_tables` / `get_table_schema`，再调 `execute_query`
+5. 执行器对 SELECT 自动注入 `LIMIT 10`（用户显式要求更多时按用户值），结果写入 `sql_result`（source=agent）并即时 WS 推送 `result` 事件
+6. 工具结果回填 LLM → 生成自然语言答案 → WS 推送 `message` 事件；若答案对应某次查询，则同时把答案写入该 `sql_result.ai_comment` 并推送 `result_update` 事件
+7. 前端：左侧消息流显示自然语言答案（工具调用过程可折叠展示），右下结果集列表新增/更新卡片
 
 ### 6.2 写操作确认（内部会话）
 1. LLM 调 `execute_update` → 工具检测到写语句 → 创建 `confirm_request`（status=pending, expires_at=+60s）→ WS 推送 `confirm_request` 事件（含 SQL、数据源、请求ID）
@@ -148,7 +149,7 @@ REST（统一前缀 `/api`）：
 - 确认：`POST /confirm/{id}/approve`、`POST /confirm/{id}/reject`
 - 系统配置：`GET /configs`、`PUT /configs/{key}`（值 true/false）
 
-WebSocket：`/ws/session/{sessionId}`，事件类型：`message`、`result`、`result_update`、`confirm_request`、`confirm_result`、`delete_denied`、`error`。
+WebSocket：`/ws/session/{sessionId}`，事件类型：`message`、`result`、`result_update`、`confirm_request`、`confirm_result`、`delete_denied`、`no_datasource`、`error`。
 
 MCP：`/mcp`（Streamable HTTP）。
 
@@ -164,6 +165,7 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 - 右上（SQL 控制台）：数据源选择、SQL 文本域（等宽字体）、执行按钮、行数上限选择、格式化按钮
 - 右下（结果集列表）：按时间倒序的卡片列表，每张卡片含：数据源、SQL（可复制）、耗时/行数/影响行数、状态标签（成功/失败/待确认）、Ant Design `Table` 结果表格（动态列）、`ai_comment` 的"AI 解读"区块；支持折叠与清空
 - 历史恢复：进入页面时 REST 拉取 messages/results；WS 断线自动重连（指数退避），重连后按 messageId 增量补齐
+- 无数据源引导：系统中没有任何数据源时，用户直接提问 → 弹出「新建数据源」表单（与数据源管理页共用同一表单组件 `DatasourceFormModal`）；保存成功后自动将新数据源设为当前选择并重发原问题，形成业务闭环
 
 ### 9.2 数据源管理 `/datasources`
 表格（名称、类型、主机、库名、只读、操作）+ 新建/编辑弹窗表单（类型下拉 mysql/postgresql、host、port、database、username、password、额外参数、只读开关）+ 行内"测试连接"按钮 + 删除二次确认。
@@ -187,6 +189,7 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 | SQL 执行超时 | 默认 30s（`Statement.setQueryTimeout`），可配置 |
 | 确认超时 | 60s 自动置 expired，回填 LLM "用户未在时限内确认" |
 | 删除操作被拦截（开发者模式关闭） | 工具返回拒绝文本（LLM 转述）；内部会话 WS 推送 `delete_denied`，前端弹出提示框并提供开启入口 |
+| 提问时无可用数据源 | 系统无任何数据源：WS 推送 `no_datasource`，前端弹新建数据源表单，创建成功后自动重发原问题；已有数据源未选择：提示先在顶栏选择 |
 | WS 断线 | 前端指数退避重连 + 增量拉取补齐 |
 | MCP 调用错误 | 以 MCP 工具错误结果返回（异常信息文本化） |
 
@@ -204,6 +207,7 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 2. 会话输入"系统有多少用户？" → 右下结果卡片展示 `select count(*) from ...` 与结果，且"AI 解读"区块展示"系统有 XXX 个用户"；左侧会话同步回答
 3. SQL 控制台输入 `select * from users` → 右下结果集展示表格
 4. 外部 MCP 客户端连接 `http://localhost:8080/mcp` → 能看到 5 个工具并可调用 `list_datasources`
+5. 全新环境（无数据源）会话中输入"帮我查询用户列表？"→ 弹出新建数据源表单 → 填写保存成功 → 自动以新数据源重发原问题并正常返回查询结果（业务闭环）
 
 ## 12. 测试策略
 
@@ -239,6 +243,7 @@ SPA 转发：非 `/api`、`/ws`、`/mcp` 的路径转发到 `index.html`（前�
 - [ ] 模型管理：配置/启用模型；厂商→模型ID 字典联动下拉
 - [ ] 工具能力对内（ChatClient）与对外（`/mcp`）均可用
 - [ ] 会话：WS 交互、写操作确认卡片、SQL 控制台、结果集列表、历史持久化
+- [ ] 无数据源闭环：无可用数据源时提问弹出新建数据源表单，创建成功后自动完成查询
 - [ ] 系统配置：开发者模式开关；关闭时删除类操作（DELETE/DROP/TRUNCATE）被拦截并弹提示框，开启后删除仍逐笔确认
 - [ ] 验收用例 1、2 通过
 - [ ] README 初始化完成（架构、快速开始、配置、MCP 接入说明、测试密钥警示）

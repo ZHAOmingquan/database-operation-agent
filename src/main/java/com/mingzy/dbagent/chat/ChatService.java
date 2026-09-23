@@ -94,8 +94,17 @@ public class ChatService {
             AiModel model = modelId != null ? modelService.requireById(modelId) : modelService.enabled();
             if (model == null) { ws.send(sessionId, "error", Map.of("message", "请先在模型管理中启用一个模型")); return; }
             Datasource ds = datasourceId != null ? datasourceService.requireById(datasourceId) : null;
-            if (ds == null && session.datasourceId() != null) ds = datasourceService.requireById(session.datasourceId());
-            if (ds == null) { ws.send(sessionId, "error", Map.of("message", "请先选择数据源")); return; }
+            if (ds == null && session.datasourceId() != null) {
+                try { ds = datasourceService.requireById(session.datasourceId()); }
+                catch (IllegalArgumentException ignored) { /* 会话引用的数据源已被删除，按无可用数据源引导 */ }
+            }
+            if (ds == null) {
+                boolean hasAny = !datasourceService.rawList().isEmpty();
+                ws.send(sessionId, "no_datasource", Map.of(
+                        "message", hasAny ? "请先选择数据源" : "尚未配置数据源，请先新建数据源",
+                        "hasAnyDatasource", hasAny));
+                return;
+            }
 
             // 1) 落库用户消息 + 更新会话标题/数据源
             chatDao.insertMessage(sessionId, "user", content, null);
