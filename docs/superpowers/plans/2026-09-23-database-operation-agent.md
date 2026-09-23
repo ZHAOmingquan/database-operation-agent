@@ -5949,7 +5949,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
-import { datasourceApi, modelApi } from '../api'
+import { datasourceApi, modelApi, sessionApi } from '../api'
 import ChatPanel from '../components/ChatPanel.vue'
 import SqlConsole from '../components/SqlConsole.vue'
 import ResultPanel from '../components/ResultPanel.vue'
@@ -5981,7 +5981,7 @@ onMounted(async () => {
 
 const onSessionChange = async (id) => { await store.switchSession(id) }
 const newSession = async () => {
-  const s = await (await import('../api')).sessionApi.create({ datasourceId: datasourceId.value })
+  const s = await sessionApi.create({ datasourceId: datasourceId.value })
   store.sessions.unshift(s)
   currentSessionId.value = s.id
   await store.switchSession(s.id)
@@ -6033,6 +6033,8 @@ const onDatasourceSaved = async (ds) => {
 ```bash
 git add -A && git commit -m "feat: chat workbench assembling three-pane layout"
 ```
+
+**实测记录（2026-09-23）：** `npm run build` 通过（ChatView chunk 12.36 kB，含全部子组件真实引用）；/chat 已指向 ChatView；Placeholder.vue 已无引用并删除（Task 3 临时占位，所有路由均已替换为真实页面）；无数据源弹表单（含自动重发）与删除拦截弹框（含前往系统配置）均已接入。
 
 ---
 
