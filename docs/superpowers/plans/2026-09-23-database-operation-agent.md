@@ -3852,7 +3852,7 @@ class ChatDaoTest {
         assertThat(msgs.get(1).toolCallsJson()).isEqualTo("[1]");
 
         long rid = dao.insertResult(new SqlResult(null, sid, aid, 1L, "mysql-mytest",
-                "select count(*) from users", "query", "[\"count(*)\"]", "[[10]]", 1, null, 5,
+                "select count(*) from users", "query", "[\"count(*)\"]", "[[10]]", 1, null, 5L,
                 null, "agent", "success", null, null));
         List<SqlResult> results = dao.listResults(sid);
         assertThat(results).hasSize(1);
