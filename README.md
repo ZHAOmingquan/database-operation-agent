@@ -80,11 +80,11 @@
 export JAVA_HOME=/path/to/jdk-21
 ./mvnw clean package
 
-# 2) 运行（默认 8080 端口，配置库自动建在 ./data/agent.db）
+# 2) 运行（默认 18080 端口，配置库自动建在 ./data/agent.db）
 java -jar target/database-operation-agent-1.0.0.jar
 
 # 3) 打开对话工作台
-# http://localhost:8080  →  自动跳转 /chat
+# http://localhost:18080  →  自动跳转 /chat
 ```
 
 日常部署推荐直接使用 `./deploy.sh`：打包后把 jar 拷到 `deploy/` 再从副本重启（含健康检查）。应用始终运行 `deploy/` 下的副本，避免后续 `mvn package` 重建 `target` jar 时破坏运行中实例的类加载（会导致页面 504 / NoClassDefFoundError）。
@@ -136,7 +136,7 @@ java -jar target/database-operation-agent-1.0.0.jar   # 直接运行
   UPDATE chat_session SET client_fingerprint='<指纹>' WHERE client_fingerprint IS NULL;
   ```
 
-- **验证**：用两个不同浏览器打开 http://localhost:8080/chat，各建一个会话 —— 列表互不可见；同一浏览器刷新后历史仍在。
+- **验证**：用两个不同浏览器打开 http://localhost:18080/chat，各建一个会话 —— 列表互不可见；同一浏览器刷新后历史仍在。
 
 ## 日志
 
@@ -144,7 +144,7 @@ java -jar target/database-operation-agent-1.0.0.jar   # 直接运行
 
 ## MCP 接入
 
-服务启动后即暴露 Streamable HTTP 端点：`http://localhost:8080/mcp`，包含 6 个工具：
+服务启动后即暴露 Streamable HTTP 端点：`http://localhost:18080/mcp`，包含 6 个工具：
 
 | 工具 | 说明 | 参数 |
 |---|---|---|
@@ -163,7 +163,7 @@ java -jar target/database-operation-agent-1.0.0.jar   # 直接运行
 {
   "mcpServers": {
     "database-operation-agent": {
-      "url": "http://localhost:8080/mcp"
+      "url": "http://localhost:18080/mcp"
     }
   }
 }
@@ -172,11 +172,11 @@ java -jar target/database-operation-agent-1.0.0.jar   # 直接运行
 curl 快速自测（先 initialize，取响应头 `Mcp-Session-Id`，再发 `notifications/initialized`，随后即可 `tools/list` / `tools/call`）：
 
 ```bash
-SID=$(curl -s -o /dev/null -w '%header{Mcp-Session-Id}' -X POST http://localhost:8080/mcp \
+SID=$(curl -s -o /dev/null -w '%header{Mcp-Session-Id}' -X POST http://localhost:18080/mcp \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}')
 
-curl -s -X POST http://localhost:8080/mcp -H 'Content-Type: application/json' \
+curl -s -X POST http://localhost:18080/mcp -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' -H "Mcp-Session-Id: $SID" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
@@ -205,7 +205,7 @@ curl -s -X POST http://localhost:8080/mcp -H 'Content-Type: application/json' \
 # 仅后端迭代（跳过前端构建，仍会复制已有 dist）
 ./mvnw spring-boot:run -Pskip-frontend
 
-# 前端热更（Vite dev server 已配置 /api、/ws 代理到 8080）
+# 前端热更（Vite dev server 已配置 /api、/ws 代理到 18080）
 cd frontend && npm install && npm run dev
 
 # 单元测试
@@ -242,7 +242,7 @@ JAVA_HOME=/path/to/jdk-21 ./mvnw test -Dtest=ChatE2eIT -Pskip-frontend \
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)
 
 ## 请作者喝杯茶
 
