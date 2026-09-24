@@ -29,7 +29,7 @@ public class DictService {
             return dao.findById(dao.insert(item));
         }
         dao.update(new DictItem(id, item.dictType(), item.dictKey(), item.dictLabel(),
-                item.parentKey(), item.sort(), item.enabled()));
+                item.parentKey(), item.sort(), item.enabled(), item.extValue()));
         return dao.findById(id);
     }
 

@@ -3,6 +3,8 @@
 > **You no longer need developers or a separate system to analyze your data** — just chat in natural language and know your database data inside out; **your data, account credentials never leave your domain at any point** — not a single byte of database data is ever sent to the LLM!!!
 >
 > The agent only operates on the designated database(s); for any instruction or question other than database DDL / DML, it clearly tells you that this type of operation is not supported.
+>
+> **If this project helps you, please consider giving it a ⭐ Star on [Gitee](https://gitee.com/mingzy/database-operation-agent) — your support means a lot and helps others discover it!**
 
 An AI agent that operates databases through natural-language conversation. Built with Spring Boot + Spring AI: a shared tool layer serves both the built-in chat (Function Calling) and external MCP clients (Streamable HTTP), paired with a Vue3 workbench.
 
@@ -13,6 +15,7 @@ An AI agent that operates databases through natural-language conversation. Built
 - **Datasource management**: MySQL / PostgreSQL CRUD, connection test, read-only switch; passwords stored with AES-GCM; dynamic Hikari pools
 - **Model management**: provider / model-ID dictionary cascading, base URL & API key, enable switch
 - **Sessions & confirmation**: WebSocket message stream; write operations require user confirmation (60s countdown)
+- **Multi-user question queue**: simultaneous questions are processed serially in a global FIFO queue (protects the model from concurrency spikes); after asking, the page shows "queuing" with the live queue count, and starts automatically when your turn arrives; model errors / rate limits surface as "model usage exceeded, service unavailable" prompts
 - **Developer-mode delete guard**: DELETE / DROP / TRUNCATE are blocked by default; the UI guides you to enable the switch
 - **No-datasource closure**: when no datasource exists, asking a question pops up a "new datasource" form; saving it auto-resends your question
 - **SQL console**: run ad-hoc SQL directly (no confirmation), results join the result panel
@@ -53,11 +56,42 @@ java -jar target/database-operation-agent-1.0.0.jar
 # open http://localhost:8080  → redirects to /chat
 ```
 
+For day-to-day deployment use `./deploy.sh`: it packages, copies the jar to `deploy/`, restarts from that copy and waits for a health check. The app always runs the `deploy/` copy, so later `mvn package` runs can't corrupt the running JVM's class loading (which causes 504s / NoClassDefFoundError).
+
+### Build the All-in-One Jar
+
+`./mvnw clean package` produces a single executable fat jar in one step:
+
+1. `frontend-maven-plugin` downloads Node v22 into `target/node` (first build) → `npm install` → `vite build` → `frontend/dist`
+2. `maven-resources-plugin` wipes and copies `frontend/dist` into `target/classes/static`
+3. `spring-boot:repackage` bundles all dependencies and the frontend into `BOOT-INF/`
+
+Artifact: `target/database-operation-agent-1.0.0.jar` (backend + frontend + dependencies + DB schema/seed in one file; creates and seeds the SQLite DB on first start).
+
+```bash
+./mvnw clean package                     # full build (includes frontend)
+./mvnw clean package -Pskip-frontend     # backend-only iteration, reuses existing dist
+java -jar target/database-operation-agent-1.0.0.jar
+```
+
+Frontend targets Chrome 64 / Firefox 60 / Safari 12+ (automatic syntax downleveling + core-js polyfills, see `frontend/vite.config.js`).
+
 Seed data (`src/main/resources/sql/update.sql`) is applied on first start: two test datasources plus dictionaries / system config. No API keys are stored in the repo — add models from the "Models" page.
 
 ## MCP Integration
 
-Endpoint: `http://localhost:8080/mcp` with tools `list_datasources`, `list_tables`, `get_table_schema`, `execute_query`, `execute_update`, `render_chart`.
+Endpoint: `http://localhost:8080/mcp` (Streamable HTTP) exposes 6 tools:
+
+| Tool | Description | Parameters |
+|---|---|---|
+| `list_datasources` | List configured datasources (name / type / read-only). Call this before any SQL to confirm available datasources | none |
+| `list_tables` | List all tables & views with comments in a datasource | `datasourceName` |
+| `get_table_schema` | Get column structure of a table (name / type / nullable / PK / default / comment) | `datasourceName`, `tableName` |
+| `execute_query` | Run a read-only query, max 10 rows by default; aggregate results (count/sum/avg/group by) also auto-render as a chart in the workbench | `datasourceName`, `sql`, `limit` (optional, default 10) |
+| `execute_update` | Run write/DDL statements (INSERT/UPDATE/DELETE/CREATE/ALTER). Delete-like ops (DELETE/DROP/TRUNCATE) require developer mode; external MCP callers must confirm before invoking | `datasourceName`, `sql` |
+| `render_chart` | Run an aggregate SQL and render it as an ECharts chart (bar/line/pie) in the workbench result panel | `datasourceName`, `sql` (aggregate), `chartType` (bar/line/pie), `title` / `xField` / `yField` (optional) |
+
+> Credential safety: datasource accounts / passwords / hosts never enter tool params or responses; tool errors are masked before returning.
 
 ```json
 {

@@ -22,6 +22,21 @@ class DbTypeTest {
     }
 
     @Test
+    void mysqlUrlWithoutDatabase() {
+        assertThat(DbType.mysql.jdbcUrl("127.0.0.1", 3306, "", null))
+                .isEqualTo("jdbc:mysql://127.0.0.1:3306?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=5000");
+        assertThat(DbType.mysql.jdbcUrl("127.0.0.1", 3306, null, "serverTimezone=Asia/Shanghai"))
+                .startsWith("jdbc:mysql://127.0.0.1:3306?")
+                .contains("serverTimezone=Asia/Shanghai");
+    }
+
+    @Test
+    void pgUrlWithoutDatabase() {
+        assertThat(DbType.postgresql.jdbcUrl("h", 5432, "", null))
+                .isEqualTo("jdbc:postgresql://h:5432?connectTimeout=5");
+    }
+
+    @Test
     void unknownTypeRejected() {
         assertThatThrownBy(() -> DbType.of("oracle")).hasMessageContaining("不支持");
     }

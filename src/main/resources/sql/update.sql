@@ -3,8 +3,8 @@
 INSERT OR IGNORE INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
 VALUES ('mysql-mytest', 'mysql', '192.168.110.88', 3306, 'mytest', 'root', 'WctOK9OPwM0V3/xuOtGpmalCk6wmFk1GKCVdeexwlUGlHJX+tg==', 0);
 
-INSERT OR IGNORE INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
-VALUES ('pg-mytest', 'postgresql', '192.168.110.88', 5432, 'mytest', 'ming', 'EQwg/Yi9ubfNUZua7ksBWQS13vnr9RHBEfZFCoqbC6fKo3iUbA==', 0);
+-- INSERT OR IGNORE INTO ds_datasource (name, db_type, host, port, database_name, username, password, read_only)
+-- VALUES ('pg-mytest', 'postgresql', '192.168.110.88', 5432, 'mytest', 'ming', 'EQwg/Yi9ubfNUZua7ksBWQS13vnr9RHBEfZFCoqbC6fKo3iUbA==', 0);
 
 -- 升级清理：移除上一版种子中的旧厂商/模型ID（幂等；不影响运行期手动添加的其他字典项）
 DELETE FROM sys_dict WHERE dict_type = 'model_provider' AND dict_key IN ('zhipu', 'openai', 'ollama');
@@ -18,6 +18,13 @@ INSERT OR IGNORE INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sor
   ('model_provider', 'glm', '智谱 GLM', NULL, 3, 1),
   ('model_provider', 'kimi', 'Kimi', NULL, 4, 1),
   ('model_provider', 'minimax', 'MiniMax', NULL, 5, 1);
+
+-- 厂商 base_url（ext_value；UPDATE 幂等，旧库升级同样生效；模型表单按厂商自动带出且不可修改）
+UPDATE sys_dict SET ext_value = 'https://api.deepseek.com/v1' WHERE dict_type = 'model_provider' AND dict_key = 'deepseek';
+UPDATE sys_dict SET ext_value = 'https://dashscope.aliyuncs.com/compatible-mode/v1' WHERE dict_type = 'model_provider' AND dict_key = 'qwen';
+UPDATE sys_dict SET ext_value = 'https://open.bigmodel.cn/api/paas/v4' WHERE dict_type = 'model_provider' AND dict_key = 'glm';
+UPDATE sys_dict SET ext_value = 'https://api.moonshot.cn/v1' WHERE dict_type = 'model_provider' AND dict_key = 'kimi';
+UPDATE sys_dict SET ext_value = 'https://api.minimaxi.com/v1' WHERE dict_type = 'model_provider' AND dict_key = 'minimax';
 
 -- 模型ID字典（parent_key 为厂商）
 INSERT OR IGNORE INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled) VALUES

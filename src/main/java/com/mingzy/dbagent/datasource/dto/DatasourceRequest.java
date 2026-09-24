@@ -8,7 +8,7 @@ public record DatasourceRequest(
         @NotBlank String dbType,
         @NotBlank String host,
         @NotNull Integer port,
-        @NotBlank String databaseName,
+        String databaseName,
         @NotBlank String username,
         String password,
         String extraParams,

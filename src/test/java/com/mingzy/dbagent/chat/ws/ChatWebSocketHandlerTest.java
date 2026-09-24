@@ -1,7 +1,7 @@
 package com.mingzy.dbagent.chat.ws;
 
 import com.mingzy.dbagent.chat.ChatDao;
-import com.mingzy.dbagent.chat.ChatService;
+import com.mingzy.dbagent.chat.ChatQueue;
 import com.mingzy.dbagent.chat.ChatSession;
 import com.mingzy.dbagent.chat.WsSessionRegistry;
 import org.junit.jupiter.api.Test;
@@ -16,10 +16,10 @@ import static org.mockito.Mockito.*;
 
 class ChatWebSocketHandlerTest {
 
-    private final ChatService chatService = mock(ChatService.class);
     private final ChatDao chatDao = mock(ChatDao.class);
     private final WsSessionRegistry registry = mock(WsSessionRegistry.class);
-    private final ChatWebSocketHandler handler = new ChatWebSocketHandler(chatService, chatDao, registry);
+    private final ChatQueue chatQueue = mock(ChatQueue.class);
+    private final ChatWebSocketHandler handler = new ChatWebSocketHandler(chatDao, registry, chatQueue);
 
     private WebSocketSession ws(String uri) {
         WebSocketSession session = mock(WebSocketSession.class);

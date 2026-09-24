@@ -14,7 +14,9 @@ export const useChatStore = defineStore('chat', {
     errors: [],
     lastPrompt: null,     // 最近一次提问，用于“无数据源”引导后自动重发
     noDatasource: null,   // 收到 no_datasource 事件时暂存 payload（{message, hasAnyDatasource}）
-    deleteDenied: null    // 收到 delete_denied 事件时暂存 payload（{sql, reason}），供工作台弹框提示
+    deleteDenied: null,   // 收到 delete_denied 事件时暂存 payload（{sql, reason}），供工作台弹框提示
+    queuePosition: null,  // 当前会话提问的排队位置（前面还有几个任务等待）；null 表示不在排队
+    modelError: null      // 模型超限/异常提示文案（model_unavailable 事件）
   }),
   actions: {
     async loadSessions() { this.sessions = await sessionApi.list() },
@@ -29,6 +31,8 @@ export const useChatStore = defineStore('chat', {
       socket.disconnect()
       this.currentSessionId = id
       this.pendingConfirms = []
+      this.queuePosition = null
+      this.modelError = null
       this.messages = await sessionApi.messages(id)
       this.results = (await sessionApi.results(id)).reverse()
       const self = this
@@ -38,19 +42,19 @@ export const useChatStore = defineStore('chat', {
       })
     },
     sendMessage(content, datasourceId, modelId) {
-      this.thinking = true
       this.lastPrompt = { content, modelId }
       // 后端以首条消息为标题；本地同步列表展示（截断规则与后端 abbreviate 一致）
       const cur = this.sessions.find((s) => s.id === this.currentSessionId)
       if (cur && cur.title === '新会话') cur.title = content.length <= 20 ? content : content.slice(0, 20) + '…'
+      // thinking 状态由 queue_start 事件置位（排队期间显示排队横幅）
       socket.send({ type: 'user_message', content, datasourceId, modelId })
     },
     clearNoDatasource() { this.noDatasource = null },
     clearDeleteDenied() { this.deleteDenied = null },
+    clearModelError() { this.modelError = null },
     resendLast(datasourceId) {
       this.noDatasource = null
       if (!this.lastPrompt) return
-      this.thinking = true
       socket.send({ type: 'user_message', content: this.lastPrompt.content,
         datasourceId, modelId: this.lastPrompt.modelId })
     },
@@ -84,11 +88,26 @@ export const useChatStore = defineStore('chat', {
         case 'no_datasource':
           this.noDatasource = p
           this.thinking = false
+          this.queuePosition = null
+          break
+        case 'queued':
+          this.queuePosition = p.position
+          break
+        case 'queue_start':
+          this.queuePosition = null
+          this.thinking = true
+          break
+        case 'model_unavailable':
+          this.modelError = p.message
+          this.messages.push({ role: 'error', content: p.message })
+          this.thinking = false
+          this.queuePosition = null
           break
         case 'error':
           this.errors.push(p.message)
           this.messages.push({ role: 'error', content: p.message })
           this.thinking = false
+          this.queuePosition = null
           break
       }
     },

@@ -7,14 +7,29 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.retry.backoff.ExponentialBackOffPolicy;
+import org.springframework.retry.policy.SimpleRetryPolicy;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Component
 public class ChatClientFactory {
+
+    /**
+     * 模型调用重试策略：全局排队下任一任务长时间占用 worker 都会阻塞其他用户，
+     * 因此不用 Spring AI 默认的 10 次/2s×5 退避，限流或网络抖动时最多再试 2 次后快速失败。
+     */
+    static final RetryTemplate RETRY_TEMPLATE = RetryTemplate.builder()
+            .maxAttempts(3)
+            .retryOn(org.springframework.ai.retry.TransientAiException.class)
+            .retryOn(org.springframework.web.client.ResourceAccessException.class)
+            .exponentialBackoff(Duration.ofSeconds(1), 2.0, Duration.ofSeconds(4))
+            .build();
 
     private final Map<Long, CacheEntry> cache = new ConcurrentHashMap<>();
 
@@ -45,6 +60,7 @@ public class ChatClientFactory {
                 .build();
         OpenAiChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(api)
+                .retryTemplate(RETRY_TEMPLATE)
                 .defaultOptions(OpenAiChatOptions.builder()
                         .model(model.modelId())
                         .temperature(model.temperature())

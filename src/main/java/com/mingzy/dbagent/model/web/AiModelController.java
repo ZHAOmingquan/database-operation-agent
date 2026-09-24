@@ -1,5 +1,6 @@
 package com.mingzy.dbagent.model.web;
 
+import com.mingzy.dbagent.common.AiReplyCleaner;
 import com.mingzy.dbagent.common.Result;
 import com.mingzy.dbagent.config.ChatClientFactory;
 import com.mingzy.dbagent.model.AiModel;
@@ -61,10 +62,11 @@ public class AiModelController {
         long start = System.currentTimeMillis();
         try {
             ChatClient client = factory.build(probe);
-            String reply = client.prompt().user("请回复：ok").call().content();
+            String reply = AiReplyCleaner.stripThinkBlocks(
+                    client.prompt().user("请回复：ok").call().content());
             return Result.ok(Map.of("success", true,
                     "elapsedMs", System.currentTimeMillis() - start,
-                    "reply", reply == null ? "" : reply));
+                    "reply", reply));
         } catch (Exception e) {
             return Result.ok(Map.of("success", false,
                     "elapsedMs", System.currentTimeMillis() - start,

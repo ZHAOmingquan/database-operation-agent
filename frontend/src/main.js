@@ -1,3 +1,5 @@
+// core-js 需最先引入：为 Chrome 63 等旧内核补齐缺失的 JS API（Promise.finally、Array.flat 等）
+import 'core-js/stable'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import Antd from 'ant-design-vue'

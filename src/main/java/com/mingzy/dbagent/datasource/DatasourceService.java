@@ -68,7 +68,7 @@ public class DatasourceService {
         boolean keepPassword = req.password() == null || req.password().isBlank();
         String password = keepPassword ? old.password() : aes.encrypt(req.password());
         dao.update(new Datasource(id, req.name(), req.dbType(), req.host(), req.port(),
-                req.databaseName(), req.username(), password, req.extraParams(), req.readOnly(), null, null));
+                dbName(req.databaseName()), req.username(), password, req.extraParams(), req.readOnly(), null, null));
         pools.evict(id);
         return DatasourceView.of(requireById(id));
     }
@@ -78,7 +78,12 @@ public class DatasourceService {
                 ? aes.encrypt(req.password())
                 : req.password();
         return new Datasource(id, req.name(), req.dbType(), req.host(), req.port(),
-                req.databaseName(), req.username(), password, req.extraParams(), req.readOnly(), null, null);
+                dbName(req.databaseName()), req.username(), password, req.extraParams(), req.readOnly(), null, null);
+    }
+
+    /** 数据库名非必填：归一化为空串，避免写入 NOT NULL 列为 NULL */
+    private static String dbName(String databaseName) {
+        return databaseName == null ? "" : databaseName.trim();
     }
 
     public void delete(long id) {

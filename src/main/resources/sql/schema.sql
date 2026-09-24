@@ -38,8 +38,12 @@ CREATE TABLE IF NOT EXISTS sys_dict (
     parent_key TEXT,
     sort INTEGER NOT NULL DEFAULT 0,
     enabled INTEGER NOT NULL DEFAULT 1,
+    ext_value TEXT,
     UNIQUE (dict_type, dict_key, parent_key)
 );
+
+-- 迁移：sys_dict 增加扩展值列（model_provider 存厂商 base_url；旧库升级，报 duplicate column 由 continue-on-error 容忍）
+ALTER TABLE sys_dict ADD COLUMN ext_value TEXT;
 
 -- parent_key 可为 NULL，IFNULL 归一化后保证 (dict_type, dict_key, parent_key) 在 NULL 场景下仍唯一（update.sql 幂等种子依赖）
 CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_dict_identity ON sys_dict(dict_type, dict_key, IFNULL(parent_key, ''));

@@ -19,12 +19,24 @@ class DictServiceTest {
             CREATE TABLE sys_dict (id INTEGER PRIMARY KEY AUTOINCREMENT, dict_type TEXT NOT NULL,
               dict_key TEXT NOT NULL, dict_label TEXT NOT NULL, parent_key TEXT,
               sort INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+              ext_value TEXT,
               UNIQUE (dict_type, dict_key, parent_key))
             """);
         service = new DictService(new DictDao(jdbc));
-        service.save(null, new DictItem(null, "model_provider", "minimax", "MiniMax", null, 1, true));
+        service.save(null, new DictItem(null, "model_provider", "minimax", "MiniMax", null, 1, true,
+                "https://api.minimaxi.com/v1"));
         service.save(null, new DictItem(null, "model_id", "MiniMax-M3", "MiniMax-M3", "minimax", 1, true));
         service.save(null, new DictItem(null, "model_id", "DeepSeek-Chat", "DeepSeek-Chat", "deepseek", 1, true));
+    }
+
+    @Test
+    void extValueRoundTrip() {
+        DictItem p = service.list("model_provider", null, null).get(0);
+        assertThat(p.extValue()).isEqualTo("https://api.minimaxi.com/v1");
+        service.save(p.id(), new DictItem(p.id(), "model_provider", "minimax", "MiniMax", null, 1, true,
+                "https://api.minimaxi.com/v2"));
+        assertThat(service.list("model_provider", null, null).get(0).extValue())
+                .isEqualTo("https://api.minimaxi.com/v2");
     }
 
     @Test

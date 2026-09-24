@@ -12,7 +12,7 @@
         <a-col :span="16"><a-form-item label="主机" required><a-input v-model:value="form.host" /></a-form-item></a-col>
         <a-col :span="8"><a-form-item label="端口" required><a-input-number v-model:value="form.port" style="width:100%" /></a-form-item></a-col>
       </a-row>
-      <a-form-item label="数据库名" required><a-input v-model:value="form.databaseName" /></a-form-item>
+      <a-form-item label="数据库名（可选，不填则仅连接实例）"><a-input v-model:value="form.databaseName" placeholder="留空可连接实例而不指定库" /></a-form-item>
       <a-form-item label="用户名" required><a-input v-model:value="form.username" /></a-form-item>
       <a-form-item :label="editing ? '密码（留空则不修改）' : '密码'">
         <a-input-password v-model:value="form.password" />

@@ -29,20 +29,21 @@
           <a-select v-model:value="form.provider" :options="providerOptions" @change="onProviderChange" />
         </a-form-item>
         <a-form-item label="模型ID" required>
-          <a-select v-model:value="form.modelId" :options="modelIdOptions" show-search
+          <a-select v-model:value="form.modelId" show-search allow-clear
                     placeholder="选择或输入模型ID" :filter-option="filterOption">
-            <template #dropdownRender="{ menu }">
+            <a-select-option v-for="o in modelIdOptions" :key="o.value" :value="o.value">{{ o.label }}</a-select-option>
+            <template #dropdownRender="{ menuNode }">
               <div>
                 <a-input v-model:value="customModelId" style="margin: 4px 8px; width: calc(100% - 16px)"
                          placeholder="自定义模型ID" @pressEnter="addCustomModelId" />
                 <a-divider style="margin: 4px 0" />
-                <component :is="menu" />
+                <component :is="menuNode" />
               </div>
             </template>
           </a-select>
         </a-form-item>
-        <a-form-item label="Base URL" required>
-          <a-input v-model:value="form.baseUrl" placeholder="https://api.minimaxi.com/v1" />
+        <a-form-item label="Base URL（按厂商字典自动带出，不可修改）">
+          <a-input v-model:value="form.baseUrl" disabled placeholder="选择厂商后自动填充；可在字典管理中维护" />
         </a-form-item>
         <a-form-item :label="form.id ? 'API Key（留空则不修改）' : 'API Key'" required>
           <a-input-password v-model:value="form.apiKey" />
@@ -96,7 +97,7 @@ const filterOption = (input, option) => (option.label ?? '').toLowerCase().inclu
 const load = async () => {
   rows.value = await modelApi.list()
   const dicts = await dictApi.list('model_provider', true)
-  providerOptions.value = dicts.map((p) => ({ value: p.dictKey, label: p.dictLabel }))
+  providerOptions.value = dicts.map((p) => ({ value: p.dictKey, label: p.dictLabel, baseUrl: p.extValue }))
 }
 
 const loadModelIds = async (provider) => {
@@ -105,7 +106,12 @@ const loadModelIds = async (provider) => {
   modelIdOptions.value = ids.map((d) => ({ value: d.dictKey, label: d.dictLabel }))
 }
 
-const onProviderChange = (v) => { form.modelId = undefined; loadModelIds(v) }
+const onProviderChange = (v) => {
+  form.modelId = undefined
+  // base_url 由厂商字典维护，随厂商选择自动带出（置灰不可改）
+  form.baseUrl = providerOptions.value.find((p) => p.value === v)?.baseUrl || ''
+  loadModelIds(v)
+}
 const addCustomModelId = () => {
   if (!customModelId.value) return
   modelIdOptions.value.push({ value: customModelId.value, label: `${customModelId.value}（自定义）` })
@@ -122,6 +128,10 @@ const openEdit = async (r) => {
 }
 
 const save = async () => {
+  if (!form.baseUrl || !form.baseUrl.trim()) {
+    message.warning('该厂商未配置 base_url，请先在字典管理中维护厂商的 base_url')
+    return
+  }
   saving.value = true
   try {
     const payload = { ...form }

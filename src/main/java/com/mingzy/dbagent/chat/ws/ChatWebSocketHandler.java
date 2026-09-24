@@ -3,7 +3,7 @@ package com.mingzy.dbagent.chat.ws;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mingzy.dbagent.chat.ChatDao;
-import com.mingzy.dbagent.chat.ChatService;
+import com.mingzy.dbagent.chat.ChatQueue;
 import com.mingzy.dbagent.chat.WsSessionRegistry;
 import com.mingzy.dbagent.common.BrowserFingerprint;
 import lombok.extern.slf4j.Slf4j;
@@ -19,15 +19,15 @@ import java.io.IOException;
 @Component
 public class ChatWebSocketHandler extends TextWebSocketHandler {
 
-    private final ChatService chatService;
     private final ChatDao chatDao;
     private final WsSessionRegistry registry;
+    private final ChatQueue chatQueue;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public ChatWebSocketHandler(ChatService chatService, ChatDao chatDao, WsSessionRegistry registry) {
-        this.chatService = chatService;
+    public ChatWebSocketHandler(ChatDao chatDao, WsSessionRegistry registry, ChatQueue chatQueue) {
         this.chatDao = chatDao;
         this.registry = registry;
+        this.chatQueue = chatQueue;
     }
 
     /** 握手校验：会话必须属于连接携带的浏览器指纹（?fp=），否则拒绝（Policy Violation） */
@@ -59,9 +59,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             String content = node.path("content").asText();
             Long datasourceId = node.hasNonNull("datasourceId") ? node.get("datasourceId").asLong() : null;
             Long modelId = node.hasNonNull("modelId") ? node.get("modelId").asLong() : null;
-            // 异步执行，避免阻塞 WS 线程
-            new Thread(() -> chatService.handleUserMessage(sessionId(session), content, datasourceId, modelId),
-                    "chat-" + sessionId(session)).start();
+            // 进入全局排队队列，由唯一的 worker 线程按 FIFO 顺序处理，避免并发打爆模型
+            chatQueue.enqueue(sessionId(session), content, datasourceId, modelId);
         }
     }
 

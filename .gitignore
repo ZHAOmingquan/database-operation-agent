@@ -34,6 +34,7 @@ data/
 *.db
 *.db-wal
 *.db-shm
+nohup.out
 
 # IDE
 .idea/

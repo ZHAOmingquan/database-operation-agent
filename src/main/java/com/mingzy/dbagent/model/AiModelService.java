@@ -34,6 +34,9 @@ public class AiModelService {
     }
 
     public AiModel create(AiModel m) {
+        if (m.baseUrl() == null || m.baseUrl().isBlank()) {
+            throw new IllegalArgumentException("base_url 不能为空，请先在字典管理中配置该厂商的 base_url");
+        }
         if (dao.findByName(m.name()) != null) {
             throw new IllegalArgumentException("模型名称已存在: " + m.name());
         }
@@ -43,6 +46,9 @@ public class AiModelService {
     }
 
     public AiModel update(long id, AiModel m) {
+        if (m.baseUrl() == null || m.baseUrl().isBlank()) {
+            throw new IllegalArgumentException("base_url 不能为空，请先在字典管理中配置该厂商的 base_url");
+        }
         AiModel old = requireById(id);
         AiModel byName = dao.findByName(m.name());
         if (byName != null && !byName.id().equals(id)) {

@@ -3,8 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>数据库操作智能体</title>
+  <!-- 双核浏览器（360 / QQ / 搜狗等）强制使用 WebKit(Chromium) 内核渲染，避免落到 IE 兼容模式 -->
+  <meta name="renderer" content="webkit" />
+  <meta name="force-rendering" content="webkit" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>数据库操作分析智能体</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <script>
+    /* 内核过低（如 IE 兼容模式）时给出明确提示：Vue 3 应用无法在此环境运行 */
+    (function () {
+      var ok = typeof window.Promise === 'function'
+        && typeof window.Symbol === 'function'
+        && typeof window.addEventListener === 'function';
+      if (!ok) {
+        function showNotice() {
+          var box = document.createElement('div');
+          box.style.cssText = 'max-width:560px;margin:140px auto;text-align:center;font-family:sans-serif;color:#333';
+          box.innerHTML = '<h2 style="margin-bottom:12px">浏览器内核版本过低</h2>'
+            + '<p style="color:#666;line-height:2">本系统需要 Chrome 64+ / Firefox 60+ / Edge 79+ / Safari 12+ 内核。<br/>'
+            + '360、QQ 等双核浏览器请切换到「极速模式」（地址栏右侧内核图标）；<br/>'
+            + 'IE 兼容模式不受支持，请升级或更换浏览器。</p>';
+          document.body.appendChild(box);
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', showNotice);
+        } else {
+          showNotice();
+        }
+      }
+    })();
+  </script>
 </head>
 <body>
   <div id="app"></div>

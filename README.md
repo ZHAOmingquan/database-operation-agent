@@ -2,6 +2,8 @@
 
 > **你不再需要开发人员或一个系统来分析你的数据**——用自然语言对话，就可以对你的数据库数据了如指掌；**数据、账号密码全过程不出域**，不会发给大模型任何数据库中的数据！！！【这是用户使用MyDBAgent与直接告诉大模型数据库连接操作的本质区别】
 > 当前 agent 仅允许对指定数据库进行操作；对于数据库 DDL / DML 之外的其他任何指令或问题，均会明确告知用户不支持此类型操作。
+>
+> **如果这个项目对你有帮助，欢迎到 [Gitee 仓库](https://gitee.com/mingzy/database-operation-agent) 点个 ⭐ Star 支持一下，让更多人发现它！**
 
 通过自然语言对话直接对数据库进行查询与增删改查的智能体。基于 Spring Boot + Spring AI 构建：内置工具层同时服务于内部对话（Function Calling）与外部 MCP 客户端（Streamable HTTP），配套 Vue3 对话工作台。
 
@@ -12,6 +14,7 @@
 - **数据源管理**：MySQL / PostgreSQL 增删改查、测试连接、只读开关；密码 AES-GCM 加密存储；动态 Hikari 连接池
 - **大模型管理**：厂商 / 模型 ID 字典联动下拉，base_url / api_key / 参数配置，启用开关
 - **会话与确认**：WebSocket 实时消息流；写操作（INSERT/UPDATE/DDL）弹出确认卡片（60s 倒计时），用户确认后执行
+- **多人提问排队**：多用户同时提问时全局 FIFO 串行排队处理（避免并发打爆模型），提问后页面实时显示“当前正在排队处理问题”与排队数量，轮到时自动开始；模型调用异常/超限时提示“模型使用超限，无法继续提供服务”
 - **开发者模式删除守卫**：默认禁止 DELETE/DROP/TRUNCATE；被拦时弹框引导前往「系统配置」开启
 - **无数据源闭环**：未配置任何数据源时提问会弹出「新建数据源」表单，保存后自动重发刚才的问题
 - **SQL 控制台**：手写 SQL 直接执行（无需确认），结果同样落库并进入结果集面板
@@ -79,6 +82,26 @@ java -jar target/database-operation-agent-1.0.0.jar
 # http://localhost:8080  →  自动跳转 /chat
 ```
 
+日常部署推荐直接使用 `./deploy.sh`：打包后把 jar 拷到 `deploy/` 再从副本重启（含健康检查）。应用始终运行 `deploy/` 下的副本，避免后续 `mvn package` 重建 `target` jar 时破坏运行中实例的类加载（会导致页面 504 / NoClassDefFoundError）。
+
+### 打包为单体 jar（All-in-One）
+
+`./mvnw clean package` 一条命令产出可直接 `java -jar` 运行的单体 jar，过程全自动：
+
+1. `frontend-maven-plugin` 下载 Node v22 到 `target/node`（首次构建）→ `npm install` → `vite build` 产出 `frontend/dist`
+2. `maven-resources-plugin` 清空并拷贝 `frontend/dist` 到 `target/classes/static`
+3. `spring-boot:repackage` 把全部依赖与前端静态资源打进 `BOOT-INF/`，生成最终 fat jar
+
+产物：`target/database-operation-agent-1.0.0.jar`（前端、后端、依赖、建库脚本一体；首次启动自动建 SQLite 库与种子数据）。
+
+```bash
+./mvnw clean package          # 全量构建（含前端）
+./mvnw clean package -Pskip-frontend   # 纯后端迭代，跳过前端（使用已有 dist）
+java -jar target/database-operation-agent-1.0.0.jar   # 直接运行
+```
+
+前端最低兼容 Chrome 64 / Firefox 60 / Safari 12 内核（构建自动降级语法 + core-js polyfill，详见前端 vite.config.js 注释）。
+
 首次启动会自动写入种子数据（`src/main/resources/sql/update.sql`）：两个测试数据源、字典与系统配置。仓库不包含任何大模型 API Key，测试模型请在「模型管理」页面自行新增。
 
 ## 配置说明（页面）
@@ -117,7 +140,17 @@ java -jar target/database-operation-agent-1.0.0.jar
 ## MCP 接入
 
 服务启动后即暴露 Streamable HTTP 端点：`http://localhost:8080/mcp`，包含 6 个工具：
-`list_datasources`、`list_tables`、`get_table_schema`、`execute_query`、`execute_update`、`render_chart`。
+
+| 工具 | 说明 | 参数 |
+|---|---|---|
+| `list_datasources` | 列出已配置的数据源（名称/类型/是否只读）。执行 SQL 前先用它确认可用数据源 | 无 |
+| `list_tables` | 列出指定数据源中的全部表与视图及其注释 | `datasourceName` |
+| `get_table_schema` | 获取指定表的字段结构（列名/类型/可空/主键/默认值/注释） | `datasourceName`、`tableName` |
+| `execute_query` | 执行只读查询，默认最多返回 10 行；聚合统计（count/sum/avg/group by）结果会同时在页面结果区以图表展示 | `datasourceName`、`sql`、`limit`（可选，默认 10） |
+| `execute_update` | 执行写入/DDL（INSERT/UPDATE/DELETE/CREATE/ALTER 等）。删除类操作（DELETE/DROP/TRUNCATE）需先开启开发者模式；MCP 外部调用请由客户端自行确认后再执行 | `datasourceName`、`sql` |
+| `render_chart` | 执行统计 SQL 并把结果以 ECharts 图表（bar/line/pie）展示在页面结果区 | `datasourceName`、`sql`（聚合查询）、`chartType`（bar/line/pie）、`title`/`xField`/`yField`（可选） |
+
+> 凭据安全：数据源账号/密码/主机不进入工具入参与响应；工具异常统一脱敏后回传。
 
 常见 MCP 客户端配置（以支持 Streamable HTTP 的客户端为例）：
 

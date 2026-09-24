@@ -32,4 +32,11 @@ class SchemaInitTest {
             "SELECT name FROM pragma_table_info('chat_session')", String.class);
         assertThat(columns).contains("client_fingerprint");
     }
+
+    @Test
+    void sysDictHasExtValueColumn() {
+        List<String> columns = jdbcTemplate.queryForList(
+            "SELECT name FROM pragma_table_info('sys_dict')", String.class);
+        assertThat(columns).contains("ext_value");
+    }
 }

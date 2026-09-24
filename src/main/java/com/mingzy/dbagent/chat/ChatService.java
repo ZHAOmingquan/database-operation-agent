@@ -1,6 +1,7 @@
 package com.mingzy.dbagent.chat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mingzy.dbagent.common.AiReplyCleaner;
 import com.mingzy.dbagent.config.ChatClientFactory;
 import com.mingzy.dbagent.datasource.Datasource;
 import com.mingzy.dbagent.datasource.DatasourceService;
@@ -122,13 +123,29 @@ public class ChatService {
                     .defaultSystem(systemPrompt(ds))
                     .defaultToolCallbacks(tools.getToolCallbacks())
                     .build();
-            String answer = client.prompt()
-                    .user(content)
-                    .toolContext(Map.of("sessionId", sessionId, "traceId", traceId))
-                    .call()
-                    .content();
+            String answer;
+            try {
+                answer = client.prompt()
+                        .user(content)
+                        .toolContext(Map.of("sessionId", sessionId, "traceId", traceId))
+                        .call()
+                        .content();
+            } catch (Exception modelEx) {
+                // 模型调用失败：占位消息标记失败，超限类错误单独提示
+                log.error("model call failed, sessionId={}", sessionId, modelEx);
+                chatDao.updateMessage(traceId, null, "error", null);
+                traces.clear(traceId);
+                if (isRateLimited(modelEx)) {
+                    ws.send(sessionId, "model_unavailable", Map.of(
+                            "message", "模型使用超限或异常，无法继续提供服务，请稍后再试"));
+                } else {
+                    ws.send(sessionId, "error", Map.of("message", "模型调用失败: " + brief(modelEx)));
+                }
+                return;
+            }
 
-            // 4) 落库回答 + 回填 ai_comment（最后一个 result）
+            // 4) 落库回答 + 回填 ai_comment（最后一个 result）；推理模型的 <think> 块不入库不入上下文
+            answer = AiReplyCleaner.stripThinkBlocks(answer);
             List<Long> resultIds = traces.results(traceId);
             chatDao.updateMessage(traceId, answer, "done", resultIds.isEmpty() ? null : resultIds.toString());
             if (!resultIds.isEmpty()) {
@@ -161,5 +178,24 @@ public class ChatService {
 
     private String abbreviate(String s) {
         return s.length() <= 20 ? s : s.substring(0, 20) + "…";
+    }
+
+    /** 识别模型限流/超限：HTTP 429 或错误信息中的限流特征（沿异常链向上检查） */
+    static boolean isRateLimited(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c instanceof org.springframework.web.client.HttpClientErrorException.TooManyRequests) return true;
+            String m = c.getMessage();
+            if (m == null) continue;
+            String lower = m.toLowerCase();
+            if (lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests")
+                    || lower.contains("quota") || lower.contains("exceed")
+                    || m.contains("超限") || m.contains("上限") || m.contains("限流")) return true;
+        }
+        return false;
+    }
+
+    private static String brief(Throwable t) {
+        String m = t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
+        return m.length() <= 200 ? m : m.substring(0, 200) + "…";
     }
 }
