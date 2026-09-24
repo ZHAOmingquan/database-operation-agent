@@ -244,8 +244,3 @@ JAVA_HOME=/path/to/jdk-21 ./mvnw test -Dtest=ChatE2eIT -Pskip-frontend \
 
 [Apache-2.0](LICENSE)
 
-## 请作者喝杯茶
-
-如果觉得这个项目对你有帮助，欢迎请作者喝杯茶 ☕
-
-![微信](docs/weixin.jpg)

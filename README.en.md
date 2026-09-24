@@ -245,9 +245,3 @@ Note: the frontend build script automatically downloads Node v22 into `target/no
 ## License
 
 [Apache-2.0](LICENSE)
-
-## Buy the Author a Cup of Tea
-
-If this project helps you, you're welcome to buy the author a cup of tea ☕
-
-![WeChat](docs/weixin.jpg)
