@@ -43,6 +43,7 @@ const execute = async () => {
 </script>
 
 <style scoped>
-.console { padding: 10px; border-bottom: 1px solid #f0f0f0; }
-.bar { display: flex; gap: 8px; margin-bottom: 8px; }
+.console { padding: 10px; border-bottom: 1px solid #f0f0f0; flex: 0 0 15%; min-height: 0; display: flex; flex-direction: column; }
+.bar { display: flex; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
+.mono { flex: 1; resize: none; }
 </style>

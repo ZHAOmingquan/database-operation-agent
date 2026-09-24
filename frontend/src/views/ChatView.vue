@@ -16,7 +16,7 @@
         <ChatPanel :datasource-id="datasourceId" :model-id="modelId" />
       </div>
     </a-layout-content>
-    <a-layout-sider width="42%" theme="light" class="pane console-pane">
+    <a-layout-sider width="50%" theme="light" class="pane console-pane">
       <SqlConsole />
       <ResultPanel />
     </a-layout-sider>
