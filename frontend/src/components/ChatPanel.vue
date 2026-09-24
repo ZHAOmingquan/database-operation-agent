@@ -5,10 +5,9 @@
       <ConfirmCard v-for="c in store.pendingConfirms" :key="'c' + c.id" :item="c" @resolve="onConfirmResolved" />
       <div v-if="store.thinking" class="thinking"><a-spin size="small" /> 思考中…</div>
     </div>
-    <div v-if="store.queuePosition !== null" class="queue-banner">
+    <div v-if="showQueueBanner" class="queue-banner">
       <a-spin size="small" />
-      <span v-if="store.queuePosition > 0">当前正在排队处理问题，排队数量：{{ store.queuePosition }}</span>
-      <span v-else>当前正在排队处理问题，即将为您处理…</span>
+      <span>当前正在排队处理问题，排队数量：{{ store.queuePosition }}</span>
     </div>
     <a-alert v-if="store.modelError" class="model-error" type="error" show-icon closable
              :message="store.modelError" @close="store.clearModelError()" />
@@ -22,7 +21,7 @@
 </template>
 
 <script setup>
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useChatStore } from '../stores/chat'
 import MessageItem from './MessageItem.vue'
 import ConfirmCard from './ConfirmCard.vue'
@@ -31,6 +30,9 @@ const props = defineProps({ datasourceId: Number, modelId: Number })
 const store = useChatStore()
 const draft = ref('')
 const scroller = ref(null)
+
+// 排队数量只有超过 5 才显示横幅（≤5 时静默等待，轮到直接处理）
+const showQueueBanner = computed(() => store.queuePosition !== null && store.queuePosition > 5)
 
 watch(() => [store.messages.length, store.pendingConfirms.length, store.thinking], async () => {
   await nextTick()

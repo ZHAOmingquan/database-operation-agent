@@ -15,7 +15,7 @@ An AI agent that operates databases through natural-language conversation. Built
 - **Datasource management**: MySQL / PostgreSQL CRUD, connection test, read-only switch; passwords stored with AES-GCM; dynamic Hikari pools
 - **Model management**: provider / model-ID dictionary cascading, base URL & API key, enable switch
 - **Sessions & confirmation**: WebSocket message stream; write operations require user confirmation (60s countdown)
-- **Multi-user question queue**: simultaneous questions are processed serially in a global FIFO queue (protects the model from concurrency spikes); after asking, the page shows "queuing" with the live queue count, and starts automatically when your turn arrives; model errors / rate limits surface as "model usage exceeded, service unavailable" prompts
+- **Multi-user question queue**: simultaneous questions enter a global FIFO queue and are processed with **up to 5-way concurrency** (balancing responsiveness against model RPM limits); the queue count refreshes live and the "queuing" banner shows only when more than 5 are ahead, otherwise it waits silently and starts automatically when your turn arrives; model errors / rate limits surface as "model usage exceeded, service unavailable" prompts
 - **Developer-mode delete guard**: DELETE / DROP / TRUNCATE are blocked by default; the UI guides you to enable the switch
 - **No-datasource closure**: when no datasource exists, asking a question pops up a "new datasource" form; saving it auto-resends your question
 - **SQL console**: run ad-hoc SQL directly (no confirmation), results join the result panel

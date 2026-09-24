@@ -63,7 +63,7 @@ export const useChatStore = defineStore('chat', {
       switch (evt.type) {
         case 'message':
           if (p.role === 'user') this.messages.push({ role: 'user', content: p.content })
-          else { this.messages.push({ role: 'assistant', content: p.content, messageId: p.messageId, toolResultIds: p.toolResultIds }); this.thinking = false }
+          else { this.messages.push({ role: 'assistant', content: p.content, messageId: p.messageId, toolResultIds: p.toolResultIds }); this.thinking = false; this.queuePosition = null }
           break
         case 'result':
           this.results.push(p)

@@ -9,18 +9,22 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
- * 多人提问全局 FIFO 排队：同一时间只处理一个模型调用，其余任务排队等待。
+ * 多人提问全局 FIFO 排队：最多 CONCURRENCY 个任务并行处理（受模型 RPM 限制），其余排队等待。
  * 入队与队列前进时通过 WS 推送排队位置（queued），开始处理时推送 queue_start。
  */
 @Slf4j
 @Component
 public class ChatQueue {
 
+    /** 最大并行处理数：与前端横幅显示阈值（>5 提示）保持一致 */
+    static final int CONCURRENCY = 5;
+
     /** 一个待处理的提问 */
     public record ChatTask(long sessionId, String content, Long datasourceId, Long modelId) {
     }
 
     private final BlockingQueue<ChatTask> queue = new LinkedBlockingQueue<>();
+    private final Object enqueueLock = new Object();
     private final WsSessionRegistry ws;
     private final ChatService chatService;
 
@@ -31,27 +35,24 @@ public class ChatQueue {
 
     @PostConstruct
     void start() {
-        Thread worker = new Thread(this::loop, "chat-queue-worker");
-        worker.setDaemon(true);
-        worker.start();
+        for (int i = 1; i <= CONCURRENCY; i++) {
+            Thread worker = new Thread(this::loop, "chat-queue-worker-" + i);
+            worker.setDaemon(true);
+            worker.start();
+        }
     }
 
     public void enqueue(long sessionId, String content, Long datasourceId, Long modelId) {
         ChatTask task = new ChatTask(sessionId, content, datasourceId, modelId);
-        queue.offer(task);
-        int position = positionOf(task);
+        // 先取位置再入队并先发 queued：保证客户端必先收到 queued、后收 queue_start（否则先到的
+        // queue_start 清了排队状态，随后到的 queued 又会把横幅状态设回来且再无事件清除）
+        int position;
+        synchronized (enqueueLock) {
+            position = queue.size();
+            queue.offer(task);
+        }
         log.debug("chat task enqueued: sessionId={}, position={}", sessionId, position);
         ws.send(sessionId, "queued", Map.of("position", position));
-    }
-
-    /** 任务在队列中的位置（前面还有几个等待的任务）；已被 worker 取走则返回 0 */
-    private int positionOf(ChatTask task) {
-        int i = 0;
-        for (ChatTask t : queue) {
-            if (t == task) return i;
-            i++;
-        }
-        return 0;
     }
 
     private void loop() {
