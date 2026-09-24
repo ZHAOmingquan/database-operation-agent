@@ -1,11 +1,12 @@
 # 数据库操作分析智能体（Database Operation Agent）
 
-> **你不再需要开发人员或一个系统来分析你的数据**——用自然语言对话，就可以对你的数据库数据了如指掌；**数据、账号密码全过程不出域**，不会发给大模型任何数据库中的数据！！！【这是用户使用MyDBAgent与直接告诉大模型数据库连接操作的本质区别】
-> 当前 agent 仅允许对指定数据库进行操作；对于数据库 DDL / DML 之外的其他任何指令或问题，均会明确告知用户不支持此类型操作。
->
+> 用自然语言对话，就可以对你的数据库数据了如指掌。单包独立运行无其他依赖，可独立使用也提供了MCP服务接口可集成到你的应用中。
+> 核心价值：数据安全！！！**数据、账号密码全过程不出域**，也不会发给大模型任何数据库中的数据！！！【这是使用MyDBAgent与直接告诉大模型数据库连接操作的本质区别】
+> 当前 agent 仅允许对数据库操作； DDL / DML 之外的其他任何指令或问题，均会明确告知用户不支持此类型操作。
 > **如果这个项目对你有帮助，欢迎到 [Gitee 仓库](https://gitee.com/mingzy/database-operation-agent) 点个 ⭐ Star 支持一下，让更多人发现它！**
 
 通过自然语言对话直接对数据库进行查询与增删改查的智能体。基于 Spring Boot + Spring AI 构建：内置工具层同时服务于内部对话（Function Calling）与外部 MCP 客户端（Streamable HTTP），配套 Vue3 对话工作台。
+- 试用地址：https://mydbagent.z-mq.com 
 
 ## 功能清单
 
@@ -238,3 +239,9 @@ JAVA_HOME=/path/to/jdk-21 ./mvnw test -Dtest=ChatE2eIT -Pskip-frontend \
 ## License
 
 [MIT](LICENSE)
+
+## 请作者喝杯茶
+
+如果觉得这个项目对你有帮助，欢迎请作者喝杯茶 ☕
+
+![微信](docs/weixin.jpg)
