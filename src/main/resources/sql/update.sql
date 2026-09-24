@@ -14,16 +14,16 @@ DELETE FROM sys_dict WHERE dict_type = 'model_id' AND dict_key IN
 -- 模型厂商字典
 INSERT OR IGNORE INTO sys_dict (dict_type, dict_key, dict_label, parent_key, sort, enabled) VALUES
   ('model_provider', 'deepseek', 'DeepSeek', NULL, 1, 1),
-  ('model_provider', 'qwen', '通义千问', NULL, 2, 1),
+  ('model_provider', 'qwen', '阿里百炼', NULL, 2, 1),
   ('model_provider', 'glm', '智谱 GLM', NULL, 3, 1),
   ('model_provider', 'kimi', 'Kimi', NULL, 4, 1),
   ('model_provider', 'minimax', 'MiniMax', NULL, 5, 1);
 
 -- 厂商 base_url（ext_value；UPDATE 幂等，旧库升级同样生效；模型表单按厂商自动带出且不可修改）
 UPDATE sys_dict SET ext_value = 'https://api.deepseek.com/v1' WHERE dict_type = 'model_provider' AND dict_key = 'deepseek';
-UPDATE sys_dict SET ext_value = 'https://dashscope.aliyuncs.com/compatible-mode/v1' WHERE dict_type = 'model_provider' AND dict_key = 'qwen';
+UPDATE sys_dict SET ext_value = 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' WHERE dict_type = 'model_provider' AND dict_key = 'qwen';
 UPDATE sys_dict SET ext_value = 'https://open.bigmodel.cn/api/paas/v4' WHERE dict_type = 'model_provider' AND dict_key = 'glm';
-UPDATE sys_dict SET ext_value = 'https://api.moonshot.cn/v1' WHERE dict_type = 'model_provider' AND dict_key = 'kimi';
+UPDATE sys_dict SET ext_value = 'https://api.kimi.com/coding/v1' WHERE dict_type = 'model_provider' AND dict_key = 'kimi';
 UPDATE sys_dict SET ext_value = 'https://api.minimaxi.com/v1' WHERE dict_type = 'model_provider' AND dict_key = 'minimax';
 
 -- 模型ID字典（parent_key 为厂商）
