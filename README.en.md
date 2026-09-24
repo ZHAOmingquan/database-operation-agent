@@ -26,9 +26,9 @@ An AI agent that queries and mutates databases through natural-language conversa
 - **Credential isolation**: DB accounts / passwords / hosts never enter the LLM context or MCP responses; tool error messages are masked before returning (see "Credential Security")
 - **File logging**: output goes to both the console and a rolling file `logs/database-operation-agent.log` (gzip archives)
 
-Agent demo video:
+Screenshot:
 
-<video src="docs/数据库智能体.mp4" controls width="100%"></video>
+![Screenshot](docs/dbagent.png)
 
 ## Architecture
 

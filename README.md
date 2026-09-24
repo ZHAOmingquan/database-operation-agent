@@ -26,9 +26,9 @@
 - **凭据隔离**：数据库账号 / 密码 / 主机不进入大模型上下文与 MCP 响应；工具异常消息统一脱敏后再回传（详见「凭据安全」）
 - **日志落盘**：同时输出控制台与滚动文件 `logs/database-operation-agent.log`（gz 归档）
 
-智能体效果视频：
+系统截图：
 
-<video src="docs/数据库智能体.mp4" controls width="100%"></video>
+![系统截图](docs/dbagent.png)
 
 ## 架构
 
